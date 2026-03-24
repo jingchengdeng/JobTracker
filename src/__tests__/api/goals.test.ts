@@ -1,28 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-
-vi.mock("@/db", () => {
-  const createChain = () => {
-    const chain: Record<string, any> = {};
-    const methods = [
-      "select",
-      "from",
-      "where",
-      "insert",
-      "update",
-      "set",
-      "values",
-      "returning",
-    ];
-    for (const m of methods) {
-      chain[m] = vi.fn(() => chain);
-    }
-    chain.get = vi.fn(() => null);
-    chain.all = vi.fn(() => []);
-    return chain;
-  };
-
-  return { db: createChain() };
+vi.mock("@/db", async () => {
+  const { createMockDb } = await import("../helpers/mock-db");
+  return { db: createMockDb() };
 });
 
 const { db } = await import("@/db");
@@ -55,7 +35,7 @@ describe("POST /api/goals", () => {
       target: 10,
       periodStart: "2026-03-16",
     };
-    // First .get() call returns null (no existing), second returns the created goal
+    // First .get() returns null (no existing), second returns the created goal
     const chain = db.select().from({} as any);
     (chain as any).get.mockReturnValueOnce(null).mockReturnValueOnce(created);
 
@@ -103,5 +83,16 @@ describe("POST /api/goals", () => {
 
     expect(res.status).toBe(200);
     expect(data.target).toBe(15);
+  });
+
+  it("throws on invalid JSON body", async () => {
+    const { POST } = await import("@/app/api/goals/route");
+    const req = new NextRequest("http://localhost:3000/api/goals", {
+      method: "POST",
+      body: "not json",
+      headers: { "content-type": "application/json" },
+    });
+
+    await expect(POST(req)).rejects.toThrow();
   });
 });

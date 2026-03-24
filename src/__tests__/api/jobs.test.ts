@@ -1,45 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-
-// Mock the db module — every test controls what the db calls return
-vi.mock("@/db", () => {
-  // Mocked data that tests can override
-  let _resolveData: unknown[] = [];
-
-  const createChain = () => {
-    const chain: Record<string, any> = {};
-    const methods = [
-      "select",
-      "from",
-      "where",
-      "orderBy",
-      "groupBy",
-      "insert",
-      "update",
-      "delete",
-      "set",
-      "values",
-      "returning",
-      "$dynamic",
-    ];
-    for (const m of methods) {
-      chain[m] = vi.fn(() => chain);
-    }
-    chain.get = vi.fn(() => null);
-    chain.all = vi.fn(() => []);
-    // Make chain thenable so `await query` works (drizzle queries are awaitable)
-    chain.then = vi.fn((resolve: any) => resolve(_resolveData));
-    chain._setResolveData = (data: unknown[]) => {
-      _resolveData = data;
-    };
-    return chain;
-  };
-
-  const chain = createChain();
-  return { db: chain };
+vi.mock("@/db", async () => {
+  const { createMockDb } = await import("../helpers/mock-db");
+  return { db: createMockDb() };
 });
 
-// Must import after mock setup
 const { db } = await import("@/db");
 
 function makeRequest(url: string) {
@@ -55,7 +20,6 @@ describe("GET /api/jobs", () => {
     const jobs = [
       { id: 1, title: "Dev", company: "Acme", status: "applied" },
     ];
-    // Set what `await query` resolves to
     (db as any)._setResolveData(jobs);
 
     const { GET } = await import("@/app/api/jobs/route");
@@ -70,7 +34,6 @@ describe("GET /api/jobs", () => {
     const { GET } = await import("@/app/api/jobs/route");
     await GET(makeRequest("/api/jobs?status=applied"));
 
-    // The where method should have been called (filter applied)
     const chain = db.select().from({} as any);
     expect(chain.where).toHaveBeenCalled();
   });
@@ -103,5 +66,16 @@ describe("POST /api/jobs", () => {
 
     expect(res.status).toBe(201);
     expect(data).toEqual(newJob);
+  });
+
+  it("throws on invalid JSON body", async () => {
+    const { POST } = await import("@/app/api/jobs/route");
+    const req = new NextRequest("http://localhost:3000/api/jobs", {
+      method: "POST",
+      body: "not json",
+      headers: { "content-type": "application/json" },
+    });
+
+    await expect(POST(req)).rejects.toThrow();
   });
 });

@@ -20,9 +20,9 @@ describe("StatCard", () => {
     expect(valueEl).toHaveStyle({ color: "#22c55e" });
   });
 
-  it("has no color style when not provided", () => {
+  it("has no inline color when not provided", () => {
     render(<StatCard label="Total" value={10} />);
     const valueEl = screen.getByText("10");
-    expect(valueEl).not.toHaveStyle({ color: expect.any(String) });
+    expect(valueEl.style.color).toBe("");
   });
 });

@@ -1,29 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-
-vi.mock("@/db", () => {
-  const createChain = (terminal?: unknown) => {
-    const chain: Record<string, any> = {};
-    const methods = [
-      "select",
-      "from",
-      "where",
-      "insert",
-      "update",
-      "delete",
-      "set",
-      "values",
-      "returning",
-    ];
-    for (const m of methods) {
-      chain[m] = vi.fn(() => chain);
-    }
-    chain.get = vi.fn(() => terminal ?? null);
-    chain.all = vi.fn(() => terminal ?? []);
-    return chain;
-  };
-
-  return { db: createChain() };
+vi.mock("@/db", async () => {
+  const { createMockDb } = await import("../helpers/mock-db");
+  return { db: createMockDb() };
 });
 
 const { db } = await import("@/db");
