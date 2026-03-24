@@ -36,7 +36,9 @@ export function Combobox({
   useEffect(() => {
     fetch(`/api/jobs/suggestions?field=${field}`)
       .then((r) => r.json())
-      .then(setSuggestions)
+      .then((data) => {
+        if (Array.isArray(data)) setSuggestions(data);
+      })
       .catch(() => {});
   }, [field]);
 
