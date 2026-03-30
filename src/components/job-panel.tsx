@@ -180,7 +180,7 @@ export function JobPanel({
               </SheetHeader>
 
               {/* Scrollable body */}
-              <ScrollArea className="flex-1">
+              <ScrollArea className="min-h-0 flex-1">
                 <div className="space-y-5 px-5 py-4">
                   {/* Metadata grid */}
                   <div className="grid grid-cols-2 gap-x-4 gap-y-3">

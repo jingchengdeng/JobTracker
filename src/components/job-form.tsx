@@ -125,7 +125,7 @@ export function JobForm({ initialData, onSubmit, onCancel }: JobFormProps) {
       </div>
 
       {/* Scrollable fields */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <form id="job-form" onSubmit={handleSubmit}>
           <div className="space-y-4 px-6 py-4">
             {/* 1. Job Title */}
@@ -332,6 +332,7 @@ export function JobForm({ initialData, onSubmit, onCancel }: JobFormProps) {
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder="Paste the job description here..."
                 rows={6}
+                className="max-h-48 overflow-y-auto"
               />
             </div>
 
