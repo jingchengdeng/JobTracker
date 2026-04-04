@@ -1,8 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { spawn } from "child_process";
-import path from "path";
+import { execFile } from "child_process";
 
 const SUPPORTED_PROVIDERS = ["openai-codex"];
+
+function getScriptPath(): string {
+  // Construct path at runtime to prevent Turbopack from analyzing it as a module import
+  const parts = [process.cwd(), "scripts", "oauth-login.mjs"];
+  return parts.join("/");
+}
 
 export async function POST(request: NextRequest) {
   const { provider } = await request.json();
@@ -14,35 +19,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const scriptPath = path.join(process.cwd(), "scripts", "oauth-login.mjs");
-
   try {
     const result = await new Promise<{ stdout: string; stderr: string }>(
       (resolve, reject) => {
-        const child = spawn("node", [scriptPath, provider], {
-          cwd: process.cwd(),
-          timeout: 120_000,
-        });
-
-        let stdout = "";
-        let stderr = "";
-
-        child.stdout.on("data", (data) => {
-          stdout += data.toString();
-        });
-        child.stderr.on("data", (data) => {
-          stderr += data.toString();
-        });
-
-        child.on("close", (code) => {
-          if (code === 0) {
-            resolve({ stdout, stderr });
-          } else {
-            reject(new Error(stderr || `Script exited with code ${code}`));
+        execFile(
+          "node",
+          [getScriptPath(), provider],
+          { cwd: process.cwd(), timeout: 120_000 },
+          (error, stdout, stderr) => {
+            if (error) {
+              reject(new Error(stderr || error.message));
+            } else {
+              resolve({ stdout, stderr });
+            }
           }
-        });
-
-        child.on("error", reject);
+        );
       }
     );
 
