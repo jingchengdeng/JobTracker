@@ -40,7 +40,7 @@ async function acquireLock(retries = 15, minDelay = 50, maxDelay = 500) {
       try {
         const st = statSync(LOCK_DIR);
         if (Date.now() - st.mtimeMs > 30_000) {
-          rmSync(LOCK_DIR);
+          rmSync(LOCK_DIR, { recursive: true });
           continue;
         }
       } catch {
@@ -55,7 +55,7 @@ async function acquireLock(retries = 15, minDelay = 50, maxDelay = 500) {
 
 function releaseLock() {
   try {
-    rmSync(LOCK_DIR);
+    rmSync(LOCK_DIR, { recursive: true });
   } catch {
     // Lock already released
   }

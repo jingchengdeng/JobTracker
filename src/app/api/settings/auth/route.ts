@@ -59,7 +59,7 @@ async function withLock<T>(fn: () => T): Promise<T> {
       try {
         const st = fs.statSync(LOCK_DIR);
         if (Date.now() - st.mtimeMs > 30_000) {
-          fs.rmSync(LOCK_DIR);
+          fs.rmSync(LOCK_DIR, { recursive: true });
           continue;
         }
       } catch {
@@ -74,7 +74,7 @@ async function withLock<T>(fn: () => T): Promise<T> {
     return fn();
   } finally {
     try {
-      fs.rmSync(LOCK_DIR);
+      fs.rmSync(LOCK_DIR, { recursive: true });
     } catch {
       // Lock already released
     }
