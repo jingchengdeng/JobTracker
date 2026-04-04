@@ -35,6 +35,18 @@ export type WorkMode = (typeof WORK_MODES)[number];
 export type Source = (typeof SOURCES)[number];
 export type GoalType = (typeof GOAL_TYPES)[number];
 
+export const AI_RUN_STATUSES = ["pending", "running", "completed", "failed"] as const;
+export const AI_STEP_TYPES = ["jd_analysis", "gap_analysis", "suggestions", "rewrite"] as const;
+export const AI_STEP_STATUSES = ["pending", "running", "completed", "failed"] as const;
+export const AI_MESSAGE_ROLES = ["user", "assistant"] as const;
+export const RESUME_FILE_TYPES = ["pdf", "docx"] as const;
+
+export type AiRunStatus = (typeof AI_RUN_STATUSES)[number];
+export type AiStepType = (typeof AI_STEP_TYPES)[number];
+export type AiStepStatus = (typeof AI_STEP_STATUSES)[number];
+export type AiMessageRole = (typeof AI_MESSAGE_ROLES)[number];
+export type ResumeFileType = (typeof RESUME_FILE_TYPES)[number];
+
 export const STATUS_LABELS: Record<JobStatus, string> = {
   saved: "Saved",
   applied: "Applied",
@@ -91,4 +103,51 @@ export interface Job {
   interviewDates: string[] | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface Resume {
+  id: number;
+  name: string;
+  version: string | null;
+  filePath: string;
+  fileType: ResumeFileType;
+  extractedText: string | null;
+  createdAt: string;
+}
+
+export interface UserPreference {
+  id: number;
+  content: string;
+  createdAt: string;
+}
+
+export interface AiRun {
+  id: number;
+  jobId: number;
+  resumeId: number;
+  status: AiRunStatus;
+  conversationSummary: string | null;
+  error: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface AiStep {
+  id: number;
+  runId: number;
+  stepType: AiStepType;
+  status: AiStepStatus;
+  result: string | null;
+  version: number;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface AiMessage {
+  id: number;
+  runId: number;
+  role: AiMessageRole;
+  content: string;
+  roundNumber: number;
+  createdAt: string;
 }

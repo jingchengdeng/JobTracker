@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { JobTable } from "@/components/job-table";
 import { JobPanel } from "@/components/job-panel";
 import { JobForm } from "@/components/job-form";
+import { AiWorkspace } from "@/components/ai-workspace";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import type { Job } from "@/lib/types";
 
@@ -14,6 +15,7 @@ export default function ApplicationsPage() {
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
   const [addingNew, setAddingNew] = useState(false);
+  const [aiJob, setAiJob] = useState<Job | null>(null);
 
   const fetchJobs = useCallback(async () => {
     try {
@@ -86,36 +88,46 @@ export default function ApplicationsPage() {
   }
 
   return (
-    <div className="space-y-4 p-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Applications</h1>
-        <Button onClick={() => setAddingNew(true)}>
-          <Plus className="mr-1.5 size-4" />
-          Add Job
-        </Button>
-      </div>
+    <>
+      {aiJob ? (
+        <AiWorkspace
+          job={aiJob}
+          onClose={() => setAiJob(null)}
+        />
+      ) : (
+        <div className="space-y-4 p-6">
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold">Applications</h1>
+            <Button onClick={() => setAddingNew(true)}>
+              <Plus className="mr-1.5 size-4" />
+              Add Job
+            </Button>
+          </div>
 
-      <JobTable jobs={jobs} onRowClick={handleRowClick} />
+          <JobTable jobs={jobs} onRowClick={handleRowClick} />
 
-      <JobPanel
-        job={selectedJob}
-        open={panelOpen}
-        onClose={() => {
-          setPanelOpen(false);
-          setSelectedJob(null);
-        }}
-        onUpdate={handleUpdate}
-        onDelete={handleDelete}
-      />
-
-      <Sheet open={addingNew} onOpenChange={(open) => setAddingNew(open)}>
-        <SheetContent side="right" showCloseButton={false} className="w-full sm:max-w-lg flex flex-col p-0 gap-0">
-          <JobForm
-            onSubmit={handleCreate}
-            onCancel={() => setAddingNew(false)}
+          <JobPanel
+            job={selectedJob}
+            open={panelOpen}
+            onClose={() => {
+              setPanelOpen(false);
+              setSelectedJob(null);
+            }}
+            onUpdate={handleUpdate}
+            onDelete={handleDelete}
+            onOpenAi={(job) => setAiJob(job)}
           />
-        </SheetContent>
-      </Sheet>
-    </div>
+
+          <Sheet open={addingNew} onOpenChange={(open) => setAddingNew(open)}>
+            <SheetContent side="right" showCloseButton={false} className="w-full sm:max-w-lg flex flex-col p-0 gap-0">
+              <JobForm
+                onSubmit={handleCreate}
+                onCancel={() => setAddingNew(false)}
+              />
+            </SheetContent>
+          </Sheet>
+        </div>
+      )}
+    </>
   );
 }

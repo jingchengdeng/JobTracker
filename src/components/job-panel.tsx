@@ -39,6 +39,7 @@ interface JobPanelProps {
   onClose: () => void;
   onUpdate: (id: number, data: any) => void;
   onDelete: (id: number) => void;
+  onOpenAi?: (job: Job) => void;
 }
 
 function formatSalary(
@@ -84,6 +85,7 @@ export function JobPanel({
   onClose,
   onUpdate,
   onDelete,
+  onOpenAi,
 }: JobPanelProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -143,6 +145,15 @@ export function JobPanel({
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
+                    {onOpenAi && (
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => onOpenAi(job)}
+                      >
+                        AI Assistant
+                      </Button>
+                    )}
                     <Button
                       variant="ghost"
                       size="icon-sm"

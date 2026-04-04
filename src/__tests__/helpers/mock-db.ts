@@ -37,6 +37,7 @@ export function createMockDb() {
 
   chain.get = vi.fn(() => null);
   chain.all = vi.fn(() => []);
+  chain.run = vi.fn(() => undefined);
   chain.then = vi.fn((resolve: (v: unknown) => unknown) => resolve(_resolveData));
   chain._setResolveData = (data: unknown) => {
     _resolveData = data;
