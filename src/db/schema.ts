@@ -6,6 +6,11 @@ import {
   WORK_MODES,
   SOURCES,
   GOAL_TYPES,
+  AI_RUN_STATUSES,
+  AI_STEP_TYPES,
+  AI_STEP_STATUSES,
+  AI_MESSAGE_ROLES,
+  RESUME_FILE_TYPES,
 } from "@/lib/types";
 
 export const jobs = sqliteTable("jobs", {
@@ -42,6 +47,71 @@ export const goals = sqliteTable("goals", {
   type: text({ enum: GOAL_TYPES }).notNull(),
   target: integer().notNull(),
   periodStart: text("period_start").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+export const resumes = sqliteTable("resumes", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  name: text().notNull(),
+  version: text(),
+  filePath: text("file_path").notNull(),
+  fileType: text("file_type", { enum: RESUME_FILE_TYPES }).notNull(),
+  extractedText: text("extracted_text"),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+export const userPreferences = sqliteTable("user_preferences", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  content: text().notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+export const aiRuns = sqliteTable("ai_runs", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  jobId: integer("job_id")
+    .notNull()
+    .references(() => jobs.id),
+  resumeId: integer("resume_id")
+    .notNull()
+    .references(() => resumes.id),
+  status: text({ enum: AI_RUN_STATUSES }).notNull().default("pending"),
+  conversationSummary: text("conversation_summary"),
+  error: text(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+  completedAt: text("completed_at"),
+});
+
+export const aiSteps = sqliteTable("ai_steps", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  runId: integer("run_id")
+    .notNull()
+    .references(() => aiRuns.id),
+  stepType: text("step_type", { enum: AI_STEP_TYPES }).notNull(),
+  status: text({ enum: AI_STEP_STATUSES }).notNull().default("pending"),
+  result: text(),
+  version: integer().notNull().default(1),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+  completedAt: text("completed_at"),
+});
+
+export const aiMessages = sqliteTable("ai_messages", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  runId: integer("run_id")
+    .notNull()
+    .references(() => aiRuns.id),
+  role: text({ enum: AI_MESSAGE_ROLES }).notNull(),
+  content: text().notNull(),
+  roundNumber: integer("round_number").notNull(),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
