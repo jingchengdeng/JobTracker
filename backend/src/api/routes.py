@@ -1,7 +1,4 @@
 import asyncio
-import json
-import os
-from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -261,38 +258,3 @@ async def retry_run(run_id: int):
     )
 
     return {"status": "pending"}
-
-
-class TokenExchangeRequest(BaseModel):
-    provider: str
-    code: str
-    state: str | None = None
-
-
-@router.post("/auth/exchange")
-async def exchange_token(req: TokenExchangeRequest):
-    auth_path = os.environ.get(
-        "AUTH_PROFILES_PATH",
-        str(Path(__file__).parent.parent.parent.parent / "data" / "auth-profiles.json"),
-    )
-
-    os.makedirs(os.path.dirname(auth_path), exist_ok=True)
-
-    store = {"profiles": {}}
-    if os.path.exists(auth_path):
-        with open(auth_path) as f:
-            store = json.load(f)
-
-    profile_id = f"{req.provider}:default"
-    store["profiles"][profile_id] = {
-        "type": "oauth",
-        "provider": req.provider,
-        "access": req.code,
-        "refresh": None,
-        "expires": None,
-    }
-
-    with open(auth_path, "w") as f:
-        json.dump(store, f, indent=2)
-
-    return {"status": "connected", "provider": req.provider}
