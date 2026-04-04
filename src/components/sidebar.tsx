@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardList, BarChart3 } from "lucide-react";
+import { ClipboardList, BarChart3, FileText, Settings } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
 import {
@@ -22,6 +22,11 @@ const navItems = [
     href: "/analytics",
     icon: BarChart3,
     label: "Analytics & Goals",
+  },
+  {
+    href: "/resumes",
+    icon: FileText,
+    label: "Resumes",
   },
 ];
 
@@ -64,7 +69,27 @@ export function Sidebar() {
           })}
         </nav>
 
-        <ThemeToggle />
+        <div className="flex flex-col items-center gap-2">
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Link
+                  href="/settings"
+                  className={cn(
+                    "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
+                    pathname.startsWith("/settings")
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  )}
+                />
+              }
+            >
+              <Settings className="h-5 w-5" />
+            </TooltipTrigger>
+            <TooltipContent side="right">Settings</TooltipContent>
+          </Tooltip>
+          <ThemeToggle />
+        </div>
       </aside>
     </TooltipProvider>
   );
