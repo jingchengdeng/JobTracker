@@ -20,12 +20,16 @@ async def lifespan(app: FastAPI):
 
     # Startup: mark any interrupted runs as failed
     conn = get_connection()
-    conn.execute(
-        "UPDATE ai_runs SET status = 'failed', error = 'Interrupted -- click Retry to re-run.' "
-        "WHERE status = 'running'"
-    )
-    conn.commit()
-    conn.close()
+    try:
+        conn.execute(
+            "UPDATE ai_runs SET status = 'failed', error = 'Interrupted -- click Retry to re-run.' "
+            "WHERE status = 'running'"
+        )
+        conn.commit()
+    except Exception as exc:
+        logger.warning("Stale-run recovery skipped: %s", exc)
+    finally:
+        conn.close()
     yield
 
 
