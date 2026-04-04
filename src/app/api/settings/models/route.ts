@@ -24,7 +24,12 @@ const DEFAULT_CONFIG: ModelConfig = {
 
 function migrateConfig(raw: Record<string, unknown>): ModelConfig {
   if ("default" in raw && typeof raw.default === "object" && raw.default !== null) {
-    return raw as unknown as ModelConfig;
+    const cfg = raw as unknown as Partial<ModelConfig>;
+    return {
+      default: cfg.default ?? DEFAULT_CONFIG.default,
+      classifier: cfg.classifier ?? DEFAULT_CONFIG.classifier,
+      embedding: cfg.embedding ?? DEFAULT_CONFIG.embedding,
+    };
   }
   return {
     default: {
@@ -69,19 +74,19 @@ export async function PUT(request: NextRequest) {
   const body = await request.json();
   const config: ModelConfig = {
     default: {
-      provider: body.default?.provider || DEFAULT_CONFIG.default.provider,
-      model: body.default?.model || DEFAULT_CONFIG.default.model,
-      fallback: body.default?.fallback || null,
+      provider: body.default?.provider ?? DEFAULT_CONFIG.default.provider,
+      model: body.default?.model ?? DEFAULT_CONFIG.default.model,
+      fallback: body.default?.fallback ?? null,
     },
     classifier: {
-      provider: body.classifier?.provider || DEFAULT_CONFIG.classifier.provider,
-      model: body.classifier?.model || DEFAULT_CONFIG.classifier.model,
-      fallback: body.classifier?.fallback || null,
+      provider: body.classifier?.provider ?? DEFAULT_CONFIG.classifier.provider,
+      model: body.classifier?.model ?? DEFAULT_CONFIG.classifier.model,
+      fallback: body.classifier?.fallback ?? null,
     },
     embedding: {
-      provider: body.embedding?.provider || DEFAULT_CONFIG.embedding.provider,
-      model: body.embedding?.model || DEFAULT_CONFIG.embedding.model,
-      fallback: body.embedding?.fallback || null,
+      provider: body.embedding?.provider ?? DEFAULT_CONFIG.embedding.provider,
+      model: body.embedding?.model ?? DEFAULT_CONFIG.embedding.model,
+      fallback: body.embedding?.fallback ?? null,
     },
   };
   writeConfig(config);

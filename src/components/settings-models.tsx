@@ -242,6 +242,7 @@ export function SettingsModels() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -257,7 +258,7 @@ export function SettingsModels() {
         );
         setAuthProfiles(profileProviders);
       })
-      .catch(() => {})
+      .catch(() => setError("Failed to load model settings."))
       .finally(() => setLoading(false));
   }, []);
 
@@ -282,7 +283,7 @@ export function SettingsModels() {
   }
 
   if (loading || !config) {
-    return <p className="text-sm text-muted-foreground">Loading...</p>;
+    return <p className="text-sm text-muted-foreground">{error ?? "Loading..."}</p>;
   }
 
   return (

@@ -10,8 +10,9 @@ def _create_chat_model(provider_id: str, model: str) -> BaseChatModel:
     provider = get_provider(provider_id)
     profile = load_credential(provider_id)
     if not profile:
+        hint = "Connect via Settings > Auth" if provider["auth"] == "oauth" else "Add one in Settings or .env"
         raise ValueError(
-            f"No credentials for {provider['label']}. Add one in Settings or .env"
+            f"No credentials for {provider['label']}. {hint}"
         )
 
     api_key = (
