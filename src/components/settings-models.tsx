@@ -4,35 +4,266 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Card } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
-interface ModelConfig {
-  defaultModel: string;
-  classifierModel: string;
-  embeddingModel: string;
+interface FallbackConfig {
+  provider: string;
+  model: string;
 }
 
-const DEFAULTS: ModelConfig = {
-  defaultModel: "gpt-4o",
-  classifierModel: "gpt-4o-mini",
-  embeddingModel: "text-embedding-3-small",
+interface RoleConfig {
+  provider: string;
+  model: string;
+  fallback: FallbackConfig | null;
+}
+
+interface ModelConfig {
+  default: RoleConfig;
+  classifier: RoleConfig;
+  embedding: RoleConfig;
+}
+
+interface ProviderInfo {
+  label: string;
+  auth: string;
+  chatModels: string[];
+  embeddingModels: string[];
+}
+
+type ProvidersMap = Record<string, ProviderInfo>;
+
+const ROLE_LABELS: Record<string, { title: string; description: string }> = {
+  default: {
+    title: "Default Model",
+    description:
+      "Used for general tasks like drafting cover letters and summarizing job descriptions.",
+  },
+  classifier: {
+    title: "Classifier Model",
+    description: "Lightweight model used to classify and tag job postings quickly.",
+  },
+  embedding: {
+    title: "Embedding Model",
+    description:
+      "Generates vector embeddings for semantic search across resumes and job postings.",
+  },
 };
 
+function ModelSelect({
+  providers,
+  role,
+  isEmbedding,
+  config,
+  onChange,
+  authProfiles,
+}: {
+  providers: ProvidersMap;
+  role: string;
+  isEmbedding: boolean;
+  config: RoleConfig;
+  onChange: (updated: RoleConfig) => void;
+  authProfiles: Set<string>;
+}) {
+  const [customModel, setCustomModel] = useState(false);
+
+  const availableProviders = Object.entries(providers).filter(([, p]) =>
+    isEmbedding ? p.embeddingModels.length > 0 : true
+  );
+
+  const currentProvider = providers[config.provider];
+  const modelList = isEmbedding
+    ? currentProvider?.embeddingModels ?? []
+    : currentProvider?.chatModels ?? [];
+  const isCustomEntry = modelList.length === 0 || customModel;
+
+  function handleProviderChange(providerId: string | null) {
+    if (!providerId) return;
+    const prov = providers[providerId];
+    const models = isEmbedding ? prov.embeddingModels : prov.chatModels;
+    const firstModel = models[0] || "";
+    setCustomModel(false);
+    onChange({ ...config, provider: providerId, model: firstModel });
+  }
+
+  function handleModelChange(value: string | null) {
+    if (!value) return;
+    if (value === "__custom__") {
+      setCustomModel(true);
+      onChange({ ...config, model: "" });
+    } else {
+      setCustomModel(false);
+      onChange({ ...config, model: value });
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <Label>Provider</Label>
+          <Select value={config.provider} onValueChange={handleProviderChange}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {availableProviders.map(([id, p]) => (
+                <SelectItem key={id} value={id} disabled={!authProfiles.has(id)}>
+                  {p.label}
+                  {!authProfiles.has(id) && " (no credentials)"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label>Model</Label>
+          {isCustomEntry ? (
+            <Input
+              value={config.model}
+              onChange={(e) => onChange({ ...config, model: e.target.value })}
+              placeholder="Enter model name"
+            />
+          ) : (
+            <Select value={config.model} onValueChange={handleModelChange}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {modelList.map((m) => (
+                  <SelectItem key={m} value={m}>
+                    {m}
+                  </SelectItem>
+                ))}
+                <SelectItem value="__custom__">Custom...</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoleCard({
+  role,
+  providers,
+  config,
+  onChange,
+  authProfiles,
+}: {
+  role: string;
+  providers: ProvidersMap;
+  config: RoleConfig;
+  onChange: (updated: RoleConfig) => void;
+  authProfiles: Set<string>;
+}) {
+  const info = ROLE_LABELS[role];
+  const isEmbedding = role === "embedding";
+  const [showFallback, setShowFallback] = useState(!!config.fallback);
+
+  function handleFallbackToggle() {
+    if (showFallback) {
+      onChange({ ...config, fallback: null });
+      setShowFallback(false);
+    } else {
+      const firstProvider = Object.keys(providers)[0];
+      const prov = providers[firstProvider];
+      const models = isEmbedding ? prov.embeddingModels : prov.chatModels;
+      onChange({
+        ...config,
+        fallback: { provider: firstProvider, model: models[0] || "" },
+      });
+      setShowFallback(true);
+    }
+  }
+
+  return (
+    <Card className="p-4 space-y-4">
+      <div>
+        <h3 className="font-medium">{info.title}</h3>
+        <p className="text-xs text-muted-foreground">{info.description}</p>
+      </div>
+
+      <ModelSelect
+        providers={providers}
+        role={role}
+        isEmbedding={isEmbedding}
+        config={config}
+        onChange={(updated) => onChange({ ...updated, fallback: config.fallback })}
+        authProfiles={authProfiles}
+      />
+
+      <div className="border-t pt-3">
+        <button
+          type="button"
+          onClick={handleFallbackToggle}
+          className="text-xs text-muted-foreground hover:text-foreground"
+        >
+          {showFallback ? "Remove fallback" : "+ Add fallback"}
+        </button>
+
+        {showFallback && config.fallback && (
+          <div className="mt-3">
+            <ModelSelect
+              providers={providers}
+              role={role}
+              isEmbedding={isEmbedding}
+              config={{
+                provider: config.fallback.provider,
+                model: config.fallback.model,
+                fallback: null,
+              }}
+              onChange={(fb) =>
+                onChange({
+                  ...config,
+                  fallback: { provider: fb.provider, model: fb.model },
+                })
+              }
+              authProfiles={authProfiles}
+            />
+          </div>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 export function SettingsModels() {
-  const [config, setConfig] = useState<ModelConfig>(DEFAULTS);
+  const [providers, setProviders] = useState<ProvidersMap>({});
+  const [config, setConfig] = useState<ModelConfig | null>(null);
+  const [authProfiles, setAuthProfiles] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    fetch("/api/settings/models")
-      .then((r) => r.json())
-      .then((data) => setConfig(data))
+    Promise.all([
+      fetch("/api/settings/providers").then((r) => r.json()),
+      fetch("/api/settings/models").then((r) => r.json()),
+      fetch("/api/settings/auth").then((r) => r.json()),
+    ])
+      .then(([provs, cfg, profiles]) => {
+        setProviders(provs);
+        setConfig(cfg);
+        const profileProviders = new Set<string>(
+          (profiles as { provider: string }[]).map((p) => p.provider)
+        );
+        setAuthProfiles(profileProviders);
+      })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
+    if (!config) return;
     setSaving(true);
     setSaved(false);
     try {
@@ -50,50 +281,22 @@ export function SettingsModels() {
     }
   }
 
-  if (loading) {
+  if (loading || !config) {
     return <p className="text-sm text-muted-foreground">Loading...</p>;
   }
 
   return (
-    <form onSubmit={handleSave} className="space-y-6 max-w-xl">
-      <div className="space-y-1.5">
-        <Label htmlFor="default-model">Default Model</Label>
-        <p className="text-xs text-muted-foreground">
-          Used for general tasks like drafting cover letters and summarizing job descriptions.
-        </p>
-        <Input
-          id="default-model"
-          value={config.defaultModel}
-          onChange={(e) => setConfig({ ...config, defaultModel: e.target.value })}
-          placeholder={DEFAULTS.defaultModel}
+    <form onSubmit={handleSave} className="space-y-6 max-w-2xl">
+      {(["default", "classifier", "embedding"] as const).map((role) => (
+        <RoleCard
+          key={role}
+          role={role}
+          providers={providers}
+          config={config[role]}
+          onChange={(updated) => setConfig({ ...config, [role]: updated })}
+          authProfiles={authProfiles}
         />
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="classifier-model">Classifier Model</Label>
-        <p className="text-xs text-muted-foreground">
-          Lightweight model used to classify and tag job postings quickly.
-        </p>
-        <Input
-          id="classifier-model"
-          value={config.classifierModel}
-          onChange={(e) => setConfig({ ...config, classifierModel: e.target.value })}
-          placeholder={DEFAULTS.classifierModel}
-        />
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="embedding-model">Embedding Model</Label>
-        <p className="text-xs text-muted-foreground">
-          Generates vector embeddings for semantic search across resumes and job postings.
-        </p>
-        <Input
-          id="embedding-model"
-          value={config.embeddingModel}
-          onChange={(e) => setConfig({ ...config, embeddingModel: e.target.value })}
-          placeholder={DEFAULTS.embeddingModel}
-        />
-      </div>
+      ))}
 
       <div className="flex items-center gap-3">
         <Button type="submit" disabled={saving}>
