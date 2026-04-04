@@ -41,6 +41,9 @@ try {
   });
 
   console.log(JSON.stringify({ status: "connected", provider, email: creds.email || null }));
+  // Force exit: pi-ai's OAuth server holds keep-alive connections open,
+  // preventing natural process termination.
+  process.exit(0);
 } catch (err) {
   console.error(JSON.stringify({ error: err.message || String(err) }));
   process.exit(1);

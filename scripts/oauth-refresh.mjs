@@ -41,6 +41,7 @@ try {
   });
 
   console.log(JSON.stringify({ status: "refreshed", provider }));
+  process.exit(0);
 } catch (err) {
   console.error(JSON.stringify({ error: err.message || String(err) }));
   process.exit(1);
