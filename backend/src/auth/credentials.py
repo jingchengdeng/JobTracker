@@ -140,13 +140,40 @@ def _fallback_to_env(provider: str) -> Optional[dict]:
     return None
 
 
+DEFAULT_MODEL_CONFIG = {
+    "default": {"provider": "openai", "model": "gpt-5.4", "fallback": None},
+    "classifier": {"provider": "openai", "model": "gpt-4o-mini", "fallback": None},
+    "embedding": {"provider": "openai", "model": "text-embedding-3-small", "fallback": None},
+}
+
+
+def _migrate_model_config(raw: dict) -> dict:
+    """Convert old flat format to new role-based format. Pass through if already new."""
+    if "default" in raw and isinstance(raw["default"], dict):
+        return raw
+    return {
+        "default": {
+            "provider": "openai",
+            "model": raw.get("defaultModel", "gpt-5.4"),
+            "fallback": None,
+        },
+        "classifier": {
+            "provider": "openai",
+            "model": raw.get("classifierModel", "gpt-4o-mini"),
+            "fallback": None,
+        },
+        "embedding": {
+            "provider": "openai",
+            "model": raw.get("embeddingModel", "text-embedding-3-small"),
+            "fallback": None,
+        },
+    }
+
+
 def load_model_config() -> dict:
     config_path = get_model_config_path()
     if os.path.exists(config_path):
         with open(config_path) as f:
-            return json.load(f)
-    return {
-        "defaultModel": "gpt-4o",
-        "classifierModel": "gpt-4o-mini",
-        "embeddingModel": "text-embedding-3-small",
-    }
+            raw = json.load(f)
+        return _migrate_model_config(raw)
+    return {**DEFAULT_MODEL_CONFIG}
