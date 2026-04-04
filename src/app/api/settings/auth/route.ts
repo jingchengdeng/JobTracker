@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
+import lockfile from "proper-lockfile";
 
 const AUTH_FILE = path.join(process.cwd(), "data", "auth-profiles.json");
+const LOCK_OPTIONS = { retries: { retries: 5, minTimeout: 100, maxTimeout: 1000 } };
 
 interface AuthProfile {
   type: "api_key" | "oauth";
@@ -11,25 +13,41 @@ interface AuthProfile {
   access?: string;
   refresh?: string;
   expires?: number;
+  email?: string;
 }
 
 interface AuthStore {
   profiles: Record<string, AuthProfile>;
 }
 
-function readStore(): AuthStore {
-  if (!fs.existsSync(AUTH_FILE)) {
-    return { profiles: {} };
-  }
-  return JSON.parse(fs.readFileSync(AUTH_FILE, "utf-8"));
-}
-
-function writeStore(store: AuthStore) {
+function ensureFile() {
   const dir = path.dirname(AUTH_FILE);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
+  if (!fs.existsSync(AUTH_FILE)) {
+    fs.writeFileSync(AUTH_FILE, JSON.stringify({ profiles: {} }, null, 2));
+  }
+}
+
+function readStore(): AuthStore {
+  ensureFile();
+  return JSON.parse(fs.readFileSync(AUTH_FILE, "utf-8"));
+}
+
+function writeStore(store: AuthStore) {
+  ensureFile();
   fs.writeFileSync(AUTH_FILE, JSON.stringify(store, null, 2));
+}
+
+async function withLock<T>(fn: () => T): Promise<T> {
+  ensureFile();
+  const release = await lockfile.lock(AUTH_FILE, LOCK_OPTIONS);
+  try {
+    return fn();
+  } finally {
+    await release();
+  }
 }
 
 function maskKey(key: string): string {
@@ -44,6 +62,7 @@ export async function GET() {
     type: profile.type,
     provider: profile.provider,
     maskedKey: profile.key ? maskKey(profile.key) : undefined,
+    email: profile.email,
     status:
       profile.type === "oauth"
         ? profile.expires && profile.expires < Date.now()
@@ -65,16 +84,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const store = readStore();
-  const id = `${provider}:default`;
-  store.profiles[id] = {
-    type: "api_key",
-    provider,
-    key,
-  };
-  writeStore(store);
+  await withLock(() => {
+    const store = readStore();
+    const id = `${provider}:default`;
+    store.profiles[id] = { type: "api_key", provider, key };
+    writeStore(store);
+  });
 
-  return NextResponse.json({ id, provider, status: "active" }, { status: 201 });
+  return NextResponse.json({ id: `${provider}:default`, provider, status: "active" }, { status: 201 });
 }
 
 export async function DELETE(request: NextRequest) {
@@ -84,13 +101,17 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "id is required" }, { status: 400 });
   }
 
-  const store = readStore();
-  if (!store.profiles[id]) {
+  const removed = await withLock(() => {
+    const store = readStore();
+    if (!store.profiles[id]) return false;
+    delete store.profiles[id];
+    writeStore(store);
+    return true;
+  });
+
+  if (!removed) {
     return NextResponse.json({ error: "Profile not found" }, { status: 404 });
   }
-
-  delete store.profiles[id];
-  writeStore(store);
 
   return NextResponse.json({ success: true });
 }
