@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "concurrently \"next dev --turbopack\" \"cd backend && uv run uvicorn src.main:app --reload --port 8000\"",
+    "dev:web": "next dev --turbopack",
+    "dev:backend": "cd backend && uv run uvicorn src.main:app --reload --port 8000",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
@@ -38,6 +40,7 @@
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitejs/plugin-react": "^6.0.1",
+    "concurrently": "^9.2.1",
     "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.1",
