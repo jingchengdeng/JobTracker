@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync, rmdirSync, existsSync, statSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, statSync } from "fs";
 import { dirname, join } from "path";
 
 const AUTH_FILE = join(process.cwd(), "data", "auth-profiles.json");
@@ -40,7 +40,7 @@ async function acquireLock(retries = 15, minDelay = 50, maxDelay = 500) {
       try {
         const st = statSync(LOCK_DIR);
         if (Date.now() - st.mtimeMs > 30_000) {
-          rmdirSync(LOCK_DIR);
+          rmSync(LOCK_DIR);
           continue;
         }
       } catch {
@@ -55,7 +55,7 @@ async function acquireLock(retries = 15, minDelay = 50, maxDelay = 500) {
 
 function releaseLock() {
   try {
-    rmdirSync(LOCK_DIR);
+    rmSync(LOCK_DIR);
   } catch {
     // Lock already released
   }

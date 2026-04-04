@@ -94,7 +94,18 @@ def load_credential(provider: str) -> Optional[dict]:
     if profile.get("type") == "oauth":
         expires = profile.get("expires") or 0
         if expires < time.time() * 1000:
-            _refresh_oauth(provider)
+            # Re-check under lock to prevent concurrent refresh spawning.
+            # Another process may have already refreshed the token.
+            needs_refresh = False
+            with _file_lock():
+                store = _read_store()
+                current = store.get("profiles", {}).get(f"{provider}:default")
+                if current and (current.get("expires") or 0) < time.time() * 1000:
+                    needs_refresh = True
+
+            if needs_refresh:
+                _refresh_oauth(provider)
+
             with _file_lock():
                 store = _read_store()
                 profile = store.get("profiles", {}).get(f"{provider}:default")
