@@ -1,9 +1,8 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, rmdirSync, existsSync, statSync } from "fs";
 import { dirname, join } from "path";
-import lockfile from "proper-lockfile";
 
 const AUTH_FILE = join(process.cwd(), "data", "auth-profiles.json");
-const LOCK_OPTIONS = { retries: { retries: 5, minTimeout: 100, maxTimeout: 1000 } };
+const LOCK_DIR = AUTH_FILE + ".lk";
 
 export function ensureDir() {
   const dir = dirname(AUTH_FILE);
@@ -25,13 +24,49 @@ export function writeStore(store) {
   writeFileSync(AUTH_FILE, JSON.stringify(store, null, 2));
 }
 
-export async function withLock(fn) {
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function acquireLock(retries = 15, minDelay = 50, maxDelay = 500) {
   ensureDir();
-  const release = await lockfile.lock(AUTH_FILE, LOCK_OPTIONS);
+  for (let i = 0; i < retries; i++) {
+    try {
+      mkdirSync(LOCK_DIR);
+      return;
+    } catch (err) {
+      if (err.code !== "EEXIST") throw err;
+      // Check for stale lock (older than 30 seconds)
+      try {
+        const st = statSync(LOCK_DIR);
+        if (Date.now() - st.mtimeMs > 30_000) {
+          rmdirSync(LOCK_DIR);
+          continue;
+        }
+      } catch {
+        continue; // Lock was released between check and stat
+      }
+      const delay = Math.min(minDelay * Math.pow(2, i), maxDelay);
+      await sleep(delay);
+    }
+  }
+  throw new Error("Could not acquire lock after retries");
+}
+
+function releaseLock() {
+  try {
+    rmdirSync(LOCK_DIR);
+  } catch {
+    // Lock already released
+  }
+}
+
+export async function withLock(fn) {
+  await acquireLock();
   try {
     return await fn();
   } finally {
-    await release();
+    releaseLock();
   }
 }
 

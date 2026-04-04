@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import fs from "fs";
 import path from "path";
-import lockfile from "proper-lockfile";
 
 const AUTH_FILE = path.join(process.cwd(), "data", "auth-profiles.json");
-const LOCK_OPTIONS = { retries: { retries: 5, minTimeout: 100, maxTimeout: 1000 } };
+const LOCK_DIR = AUTH_FILE + ".lk";
 
 interface AuthProfile {
   type: "api_key" | "oauth";
@@ -40,13 +39,45 @@ function writeStore(store: AuthStore) {
   fs.writeFileSync(AUTH_FILE, JSON.stringify(store, null, 2));
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function withLock<T>(fn: () => T): Promise<T> {
   ensureFile();
-  const release = await lockfile.lock(AUTH_FILE, LOCK_OPTIONS);
+  const retries = 15;
+  const minDelay = 50;
+  const maxDelay = 500;
+
+  for (let i = 0; i < retries; i++) {
+    try {
+      fs.mkdirSync(LOCK_DIR);
+      break;
+    } catch (err: any) {
+      if (err.code !== "EEXIST") throw err;
+      // Stale lock recovery
+      try {
+        const st = fs.statSync(LOCK_DIR);
+        if (Date.now() - st.mtimeMs > 30_000) {
+          fs.rmdirSync(LOCK_DIR);
+          continue;
+        }
+      } catch {
+        continue;
+      }
+      if (i === retries - 1) throw new Error("Could not acquire auth file lock");
+      await sleep(Math.min(minDelay * Math.pow(2, i), maxDelay));
+    }
+  }
+
   try {
     return fn();
   } finally {
-    await release();
+    try {
+      fs.rmdirSync(LOCK_DIR);
+    } catch {
+      // Lock already released
+    }
   }
 }
 

@@ -10,21 +10,25 @@ if (provider !== "openai-codex") {
 try {
   const profileId = `${provider}:default`;
 
-  const store = readStore();
-  const profile = store.profiles[profileId];
+  // Read refresh token under lock to avoid TOCTOU race
+  let refreshToken;
+  await withLock(() => {
+    const store = readStore();
+    const profile = store.profiles[profileId];
 
-  if (!profile || profile.type !== "oauth") {
-    console.error(JSON.stringify({ error: `No OAuth profile found for ${provider}` }));
-    process.exit(1);
-  }
+    if (!profile || profile.type !== "oauth") {
+      throw new Error(`No OAuth profile found for ${provider}`);
+    }
+    if (!profile.refresh) {
+      throw new Error("No refresh token available. Re-login required.");
+    }
+    refreshToken = profile.refresh;
+  });
 
-  if (!profile.refresh) {
-    console.error(JSON.stringify({ error: "No refresh token available. Re-login required." }));
-    process.exit(1);
-  }
+  // Network call outside lock to avoid holding it during I/O
+  const refreshed = await refreshOpenAICodexToken(refreshToken);
 
-  const refreshed = await refreshOpenAICodexToken(profile.refresh);
-
+  // Write updated tokens under lock
   await withLock(() => {
     const current = readStore();
     current.profiles[profileId] = {

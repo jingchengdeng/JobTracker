@@ -2,10 +2,9 @@ import json
 import os
 import subprocess
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional
-
-from filelock import FileLock
 
 
 def get_auth_file_path() -> str:
@@ -22,8 +21,45 @@ def get_model_config_path() -> str:
     )
 
 
-def _get_lock() -> FileLock:
-    return FileLock(get_auth_file_path() + ".lock", timeout=10)
+def _lock_dir_path() -> str:
+    return get_auth_file_path() + ".lk"
+
+
+@contextmanager
+def _file_lock(retries: int = 15, min_delay: float = 0.05, max_delay: float = 0.5):
+    """Cross-language compatible mkdir-based lock.
+
+    Uses the same .lk directory as the Node.js auth-store helpers,
+    ensuring Python and Node never write to auth-profiles.json simultaneously.
+    """
+    lock_dir = _lock_dir_path()
+    os.makedirs(os.path.dirname(lock_dir), exist_ok=True)
+
+    for i in range(retries):
+        try:
+            os.mkdir(lock_dir)
+            break
+        except FileExistsError:
+            # Check for stale lock (older than 30 seconds)
+            try:
+                st = os.stat(lock_dir)
+                if time.time() - st.st_mtime > 30:
+                    os.rmdir(lock_dir)
+                    continue
+            except (FileNotFoundError, OSError):
+                continue
+            delay = min(min_delay * (2 ** i), max_delay)
+            time.sleep(delay)
+    else:
+        raise TimeoutError("Could not acquire auth file lock after retries")
+
+    try:
+        yield
+    finally:
+        try:
+            os.rmdir(lock_dir)
+        except OSError:
+            pass
 
 
 def _read_store() -> dict:
@@ -48,7 +84,7 @@ def _refresh_oauth(provider: str) -> None:
 
 def load_credential(provider: str) -> Optional[dict]:
     """Load full credential profile. Refreshes OAuth tokens if expired."""
-    with _get_lock():
+    with _file_lock():
         store = _read_store()
         profile = store.get("profiles", {}).get(f"{provider}:default")
 
@@ -59,7 +95,7 @@ def load_credential(provider: str) -> Optional[dict]:
         expires = profile.get("expires") or 0
         if expires < time.time() * 1000:
             _refresh_oauth(provider)
-            with _get_lock():
+            with _file_lock():
                 store = _read_store()
                 profile = store.get("profiles", {}).get(f"{provider}:default")
 
