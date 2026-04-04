@@ -53,3 +53,6 @@ backend/__pycache__/
 
 # local data (resumes, vector db, auth tokens)
 data/
+
+# design docs
+docs/superpowers/
