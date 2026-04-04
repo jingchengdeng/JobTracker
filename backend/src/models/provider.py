@@ -1,9 +1,8 @@
 from langchain_core.language_models import BaseChatModel
-from src.auth.credentials import load_api_key, load_model_config
+from src.auth.credentials import load_credential, load_model_config
 
 
 def get_chat_model(model_name: str | None = None) -> BaseChatModel:
-    """Create a LangChain chat model based on the model name and available credentials."""
     config = load_model_config()
     model = model_name or config["defaultModel"]
 
@@ -16,7 +15,6 @@ def get_chat_model(model_name: str | None = None) -> BaseChatModel:
 
 
 def get_classifier_model() -> BaseChatModel:
-    """Get the model configured for classification tasks."""
     config = load_model_config()
     return get_chat_model(config["classifierModel"])
 
@@ -24,29 +22,38 @@ def get_classifier_model() -> BaseChatModel:
 def _create_openai(model: str) -> BaseChatModel:
     from langchain_openai import ChatOpenAI
 
-    api_key = load_api_key("openai")
-    if not api_key:
-        raise ValueError("No OpenAI API key found. Add one in Settings or .env")
-    return ChatOpenAI(model=model, api_key=api_key)
+    profile = load_credential("openai")
+    if not profile:
+        profile = load_credential("openai-codex")
+    if not profile:
+        raise ValueError("No OpenAI credentials found. Add one in Settings or .env")
+
+    if profile.get("type") == "oauth" and profile.get("provider") == "openai-codex":
+        return ChatOpenAI(
+            model=model,
+            api_key=profile["access"],
+            base_url="https://chatgpt.com/backend-api",
+        )
+    return ChatOpenAI(model=model, api_key=profile["key"])
 
 
 def _create_anthropic(model: str) -> BaseChatModel:
     from langchain_anthropic import ChatAnthropic
 
-    api_key = load_api_key("anthropic")
-    if not api_key:
+    profile = load_credential("anthropic")
+    if not profile:
         raise ValueError("No Anthropic API key found. Add one in Settings or .env")
-    return ChatAnthropic(model=model, api_key=api_key)
+    return ChatAnthropic(model=model, api_key=profile["key"])
 
 
 def _create_openrouter(model: str) -> BaseChatModel:
     from langchain_openai import ChatOpenAI
 
-    api_key = load_api_key("openrouter")
-    if not api_key:
+    profile = load_credential("openrouter")
+    if not profile:
         raise ValueError("No OpenRouter API key found. Add one in Settings or .env")
     return ChatOpenAI(
         model=model,
-        api_key=api_key,
+        api_key=profile["key"],
         base_url="https://openrouter.ai/api/v1",
     )
