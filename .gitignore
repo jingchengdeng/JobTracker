@@ -42,3 +42,14 @@ next-env.d.ts
 
 # local db
 jobtracker.db
+jobtracker.db-shm
+jobtracker.db-wal
+
+# python backend
+backend/.venv/
+backend/__pycache__/
+**/__pycache__/
+*.pyc
+
+# local data (resumes, vector db, auth tokens)
+data/
