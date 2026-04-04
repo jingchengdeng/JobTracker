@@ -178,3 +178,52 @@ class TestMigrateModelConfig:
         }
         result = _migrate_model_config(new)
         assert result == new
+
+
+@pytest.mark.live
+class TestLiveProviderSmoke:
+    """Layer 4: Live smoke tests — only run with credentials present."""
+
+    def test_openai_live(self):
+        from src.auth.credentials import load_api_key
+        from src.models.provider import _create_chat_model
+
+        key = load_api_key("openai")
+        if not key:
+            pytest.skip("No openai credentials configured")
+        model = _create_chat_model("openai", "gpt-4o-mini")
+        result = model.invoke("Reply with the word hello")
+        assert result.content
+
+    def test_openai_codex_live(self):
+        from src.auth.credentials import load_api_key
+        from src.models.provider import _create_chat_model
+
+        key = load_api_key("openai-codex")
+        if not key:
+            pytest.skip("No openai-codex credentials configured")
+        model = _create_chat_model("openai-codex", "gpt-5.4")
+        result = model.invoke("Reply with the word hello")
+        assert result.content
+
+    def test_anthropic_live(self):
+        from src.auth.credentials import load_api_key
+        from src.models.provider import _create_chat_model
+
+        key = load_api_key("anthropic")
+        if not key:
+            pytest.skip("No anthropic credentials configured")
+        model = _create_chat_model("anthropic", "claude-haiku-4-5")
+        result = model.invoke("Reply with the word hello")
+        assert result.content
+
+    def test_kimi_live(self):
+        from src.auth.credentials import load_api_key
+        from src.models.provider import _create_chat_model
+
+        key = load_api_key("kimi")
+        if not key:
+            pytest.skip("No kimi credentials configured")
+        model = _create_chat_model("kimi", "kimi-k2")
+        result = model.invoke("Reply with the word hello")
+        assert result.content
