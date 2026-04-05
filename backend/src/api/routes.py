@@ -312,3 +312,24 @@ async def retry_run(run_id: int):
     )
 
     return {"status": "pending"}
+
+
+@router.delete("/runs/{run_id}", status_code=204)
+async def delete_run(run_id: int):
+    conn = get_connection()
+    try:
+        run = conn.execute(
+            "SELECT status FROM ai_runs WHERE id = ?", (run_id,)
+        ).fetchone()
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if run["status"] == "running":
+            raise HTTPException(status_code=409, detail="run_in_progress")
+        conn.execute("BEGIN")
+        conn.execute("DELETE FROM ai_messages WHERE run_id = ?", (run_id,))
+        conn.execute("DELETE FROM ai_steps WHERE run_id = ?", (run_id,))
+        conn.execute("DELETE FROM ai_runs WHERE id = ?", (run_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return None
