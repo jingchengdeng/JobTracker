@@ -12,8 +12,8 @@ def configured_signature() -> str:
 def get_embedding_function():
     """Return an embedding function for the currently-configured model.
 
-    Falls back to local sentence-transformer if no API key is available for
-    the configured provider.
+    Raises ValueError if the configured provider requires an API key and none
+    is available. Legacy shim — prefer embedding_function_for_signature.
     """
     config = load_model_config()
     embedding = config["embedding"]
