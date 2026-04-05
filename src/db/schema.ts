@@ -109,6 +109,7 @@ export const aiSteps = sqliteTable("ai_steps", {
   status: text({ enum: AI_STEP_STATUSES }).notNull().default("pending"),
   result: text(),
   version: integer().notNull().default(1),
+  roundNumber: integer("round_number").notNull().default(0),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),

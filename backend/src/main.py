@@ -17,6 +17,21 @@ from src.api.exception_handlers import register_exception_handlers
 logger = logging.getLogger("jobtracker")
 
 
+def _ensure_round_number_column(db_path: str) -> None:
+    """Add round_number column to ai_steps if missing. Idempotent."""
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(ai_steps)").fetchall()}
+        if "round_number" not in cols:
+            conn.execute(
+                "ALTER TABLE ai_steps ADD COLUMN round_number INTEGER NOT NULL DEFAULT 0"
+            )
+            conn.commit()
+    finally:
+        conn.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Check LangSmith config
@@ -51,6 +66,12 @@ async def lifespan(app: FastAPI):
         reconcile_resume_index_state()
     except Exception as exc:
         logger.warning("Resume index reconciliation skipped: %s", exc)
+
+    try:
+        from src.db import get_db_path
+        _ensure_round_number_column(get_db_path())
+    except Exception as exc:
+        logger.warning("round_number migration skipped: %s", exc)
 
     yield
 
