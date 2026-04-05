@@ -243,6 +243,11 @@ export function SettingsModels() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reindexNotice, setReindexNotice] = useState<{
+    configured: string;
+    active: string | null;
+    count: number;
+  } | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -276,6 +281,23 @@ export function SettingsModels() {
       if (res.ok) {
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
+        try {
+          const statusRes = await fetch("/api/ai/embedding/status");
+          if (statusRes.ok) {
+            const status = await statusRes.json();
+            if (status.configured_signature !== status.active_signature) {
+              setReindexNotice({
+                configured: status.configured_signature,
+                active: status.active_signature,
+                count: status.resumes.length,
+              });
+            } else {
+              setReindexNotice(null);
+            }
+          }
+        } catch {
+          // ignore; the resumes-page banner will still surface any mismatch
+        }
       }
     } finally {
       setSaving(false);
@@ -305,6 +327,16 @@ export function SettingsModels() {
         </Button>
         {saved && <span className="text-xs text-muted-foreground">Saved.</span>}
       </div>
+
+      {reindexNotice && (
+        <div className="mt-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          Embedding model changed to <code>{reindexNotice.configured}</code>.{" "}
+          {reindexNotice.count} resumes need reindexing.{" "}
+          <a href="/resumes" className="font-medium underline">
+            Go to Resume tab →
+          </a>
+        </div>
+      )}
     </form>
   );
 }
