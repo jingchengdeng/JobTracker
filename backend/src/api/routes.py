@@ -263,21 +263,32 @@ def _classify_and_run_pipeline(
         if step["step_type"] not in previous_state:
             previous_state[step["step_type"]] = step["result"]
 
-    run_pipeline(
-        run_id=run_id,
-        job_id=job_id,
-        resume_id=resume_id,
-        jd_text=jd_text,
-        resume_text=resume_text,
-        round_number=round_num,
-        previous_state=previous_state,
-        conversation_summary=summary,
-        recent_messages=recent,
-        needs_jd_analysis=needs_jd,
-        needs_gap_analysis=needs_gap,
-        needs_suggestions=needs_sug,
-        needs_rewrite=needs_rew,
-    )
+    try:
+        run_pipeline(
+            run_id=run_id,
+            job_id=job_id,
+            resume_id=resume_id,
+            jd_text=jd_text,
+            resume_text=resume_text,
+            round_number=round_num,
+            previous_state=previous_state,
+            conversation_summary=summary,
+            recent_messages=recent,
+            needs_jd_analysis=needs_jd,
+            needs_gap_analysis=needs_gap,
+            needs_suggestions=needs_sug,
+            needs_rewrite=needs_rew,
+        )
+    except Exception:
+        logger.exception("Pipeline failed for run %s round %s", run_id, round_num)
+        conn = get_connection()
+        conn.execute(
+            "UPDATE ai_runs SET status = 'failed', error = 'Pipeline error' WHERE id = ? AND status = 'running'",
+            (run_id,),
+        )
+        conn.commit()
+        conn.close()
+        return
 
     try:
         llm = get_chat_model()

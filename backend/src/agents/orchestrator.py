@@ -51,6 +51,8 @@ def _update_step_status(
             (run_id, step_type, status, existing["version"] + 1, round_number),
         )
     elif existing:
+        # UPDATE targets the latest-version row, which was INSERTed at "running"
+        # with the correct round_number. No need to overwrite it here.
         conn.execute(
             "UPDATE ai_steps SET status = ?, result = ?, completed_at = datetime('now') WHERE id = ?",
             (status, result, existing["id"]),
