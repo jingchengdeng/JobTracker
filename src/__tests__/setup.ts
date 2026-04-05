@@ -10,6 +10,7 @@ Object.defineProperty(globalThis, "jest", {
   get() {
     return {
       advanceTimersByTime: (ms: number) => vi.advanceTimersByTime(ms),
+      isFakeTimers: () => true,
     };
   },
 });

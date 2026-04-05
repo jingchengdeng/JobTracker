@@ -33,6 +33,7 @@ export function ResumeTailorTab({ job }: ResumeTailorTabProps) {
   const [chatInput, setChatInput] = useState("");
   const [expandedStepIds, setExpandedStepIds] = useState<Set<number>>(new Set());
   const lastRoundRef = useRef<number>(-1);
+  const lastFetchedMsgRoundRef = useRef<number>(-1);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const { runs, error: runsError, refresh: refreshRuns } = useRunHistory(job.id);
 
@@ -47,10 +48,10 @@ export function ResumeTailorTab({ job }: ResumeTailorTabProps) {
       if (res.ok) {
         const data = await res.json();
         setResumes(data);
-        if (data.length > 0 && !selectedResumeId) setSelectedResumeId(data[0].id);
+        setSelectedResumeId((prev) => prev ?? (data.length > 0 ? data[0].id : null));
       }
     } catch (err) { console.error(err); }
-  }, [selectedResumeId]);
+  }, []);
 
   useEffect(() => { fetchResumes(); }, [fetchResumes]);
 
@@ -60,11 +61,12 @@ export function ResumeTailorTab({ job }: ResumeTailorTabProps) {
   }, [runs, selectedRunId]);
 
   useEffect(() => {
+    lastRoundRef.current = -1;
+    lastFetchedMsgRoundRef.current = -1;
     if (selectedRunId === null) {
       setActiveRun(null);
       setMessages([]);
       setExpandedStepIds(new Set());
-      lastRoundRef.current = -1;
       return;
     }
     let cancelled = false;
@@ -80,7 +82,14 @@ export function ResumeTailorTab({ job }: ResumeTailorTabProps) {
           refreshRuns();
           return;
         }
-        if (runRes.ok) setActiveRun(await runRes.json());
+        if (runRes.ok) {
+          const runData: RunData = await runRes.json();
+          setActiveRun(runData);
+          const maxR = runData.steps?.length
+            ? Math.max(...runData.steps.map((s) => s.round_number))
+            : -1;
+          lastFetchedMsgRoundRef.current = maxR;
+        }
         if (msgRes.ok) {
           const data = await msgRes.json();
           setMessages(data.messages);
@@ -119,6 +128,8 @@ export function ResumeTailorTab({ job }: ResumeTailorTabProps) {
   useEffect(() => {
     if (!activeRun) return;
     if (maxRoundInSteps < 0) return;
+    if (maxRoundInSteps <= lastFetchedMsgRoundRef.current) return;
+    lastFetchedMsgRoundRef.current = maxRoundInSteps;
     let cancelled = false;
     fetch(`/api/ai/runs/${activeRun.id}/messages`)
       .then((r) => (r.ok ? r.json() : null))

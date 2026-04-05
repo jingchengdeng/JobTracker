@@ -42,7 +42,10 @@ export function useRunHistory(jobId: number) {
     fetchRuns();
     return () => {
       mountedRef.current = false;
-      if (timerRef.current) clearTimeout(timerRef.current);
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
     };
   }, [fetchRuns]);
 
@@ -53,7 +56,10 @@ export function useRunHistory(jobId: number) {
       fetchRuns();
     }, POLL_INTERVAL_MS);
     return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
     };
   }, [runs, fetchRuns]);
 
