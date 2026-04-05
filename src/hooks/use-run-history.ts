@@ -14,43 +14,48 @@ export function useRunHistory(jobId: number) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
 
   const fetchRuns = useCallback(async () => {
     try {
       const res = await fetch(`/api/ai/jobs/${jobId}/runs`);
       if (!res.ok) throw new Error(`status ${res.status}`);
       const data: RunSummary[] = await res.json();
-      setRuns(data);
-      setError(null);
-      setLoading(false);
+      if (mountedRef.current) {
+        setRuns(data);
+        setError(null);
+        setLoading(false);
+      }
       return data;
     } catch (err) {
-      setError(String(err));
-      setLoading(false);
+      if (mountedRef.current) {
+        setError(String(err));
+        setLoading(false);
+      }
       return null;
     }
   }, [jobId]);
 
-  const scheduleNext = useCallback(
-    (data: RunSummary[] | null) => {
+  useEffect(() => {
+    mountedRef.current = true;
+    setLoading(true);
+    fetchRuns();
+    return () => {
+      mountedRef.current = false;
       if (timerRef.current) clearTimeout(timerRef.current);
-      if (data && hasActive(data)) {
-        timerRef.current = setTimeout(async () => {
-          const next = await fetchRuns();
-          scheduleNext(next);
-        }, POLL_INTERVAL_MS);
-      }
-    },
-    [fetchRuns],
-  );
+    };
+  }, [fetchRuns]);
 
   useEffect(() => {
-    setLoading(true);
-    fetchRuns().then(scheduleNext);
+    if (timerRef.current) clearTimeout(timerRef.current);
+    if (!hasActive(runs)) return;
+    timerRef.current = setTimeout(() => {
+      fetchRuns();
+    }, POLL_INTERVAL_MS);
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
-  }, [fetchRuns, scheduleNext]);
+  }, [runs, fetchRuns]);
 
   return { runs, loading, error, refresh: fetchRuns };
 }
