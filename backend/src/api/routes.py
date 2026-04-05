@@ -7,6 +7,7 @@ from src.db import get_connection
 from src.memory.rag import index_resume, delete_resume_chunks
 from src.services.text_extract import extract_text
 from src.agents.orchestrator import run_pipeline
+from src.agents.classifier import classify_followup
 from src.memory.conversation import (
     save_message,
     get_recent_messages,
@@ -95,12 +96,14 @@ async def create_run(req: CreateRunRequest):
 
     asyncio.get_event_loop().run_in_executor(
         None,
-        run_pipeline,
-        run_id,
-        req.job_id,
-        req.resume_id,
-        job["description"],
-        resume["extracted_text"],
+        lambda: run_pipeline(
+            run_id=run_id,
+            job_id=req.job_id,
+            resume_id=req.resume_id,
+            jd_text=job["description"],
+            resume_text=resume["extracted_text"],
+            round_number=0,
+        ),
     )
 
     return {"run_id": run_id, "status": "pending"}
@@ -199,8 +202,22 @@ async def send_message(run_id: int, req: SendMessageRequest):
     round_num = get_current_round(run_id)
     save_message(run_id, "user", req.content, round_num)
 
-    recent = get_recent_messages(run_id)
     summary = get_conversation_summary(run_id)
+
+    try:
+        classifier_result = classify_followup(req.content, summary or "")
+        ack_text = classifier_result.response_message
+        needs_jd = classifier_result.needs_jd_analysis
+        needs_gap = classifier_result.needs_gap_analysis
+        needs_sug = classifier_result.needs_suggestions
+        needs_rew = classifier_result.needs_rewrite
+    except Exception:
+        ack_text = "Working on your refine..."
+        needs_jd = needs_gap = needs_sug = needs_rew = True
+
+    save_message(run_id, "assistant", ack_text, round_num)
+
+    recent = get_recent_messages(run_id)
 
     conn = get_connection()
     steps = conn.execute(
@@ -216,44 +233,38 @@ async def send_message(run_id: int, req: SendMessageRequest):
 
     asyncio.get_event_loop().run_in_executor(
         None,
-        lambda: _run_followup(
+        lambda: _run_followup_pipeline(
             run_id, run["job_id"], run["resume_id"],
             job["description"], resume["extracted_text"],
-            req.content, summary, recent, previous_state, round_num,
+            summary, recent, previous_state, round_num,
+            needs_jd, needs_gap, needs_sug, needs_rew,
         ),
     )
 
     return {"status": "running", "round": round_num}
 
 
-def _run_followup(
+def _run_followup_pipeline(
     run_id, job_id, resume_id, jd_text, resume_text,
-    message, summary, recent, previous_state, round_num,
+    summary, recent, previous_state, round_num,
+    needs_jd, needs_gap, needs_sug, needs_rew,
 ):
-    """Run the pipeline for a follow-up message, then save the response and summarize."""
-    result = run_pipeline(
+    """Run the pipeline for a follow-up message and summarize older rounds."""
+    run_pipeline(
         run_id=run_id,
         job_id=job_id,
         resume_id=resume_id,
         jd_text=jd_text,
         resume_text=resume_text,
-        is_followup=True,
-        followup_message=message,
+        round_number=round_num,
+        previous_state=previous_state,
         conversation_summary=summary,
         recent_messages=recent,
-        previous_state=previous_state,
+        needs_jd_analysis=needs_jd,
+        needs_gap_analysis=needs_gap,
+        needs_suggestions=needs_sug,
+        needs_rewrite=needs_rew,
     )
-
-    response_parts = []
-    if result.get("rewrite"):
-        response_parts.append("Rewrite updated.")
-    if result.get("suggestions"):
-        response_parts.append("Suggestions updated.")
-    if result.get("gap_analysis"):
-        response_parts.append("Gap analysis updated.")
-
-    assistant_content = " ".join(response_parts) if response_parts else "Pipeline completed."
-    save_message(run_id, "assistant", assistant_content, round_num)
 
     try:
         llm = get_chat_model()
@@ -306,9 +317,14 @@ async def retry_run(run_id: int):
 
     asyncio.get_event_loop().run_in_executor(
         None,
-        run_pipeline,
-        run_id, run["job_id"], run["resume_id"],
-        job["description"], resume["extracted_text"],
+        lambda: run_pipeline(
+            run_id=run_id,
+            job_id=run["job_id"],
+            resume_id=run["resume_id"],
+            jd_text=job["description"],
+            resume_text=resume["extracted_text"],
+            round_number=0,
+        ),
     )
 
     return {"status": "pending"}
