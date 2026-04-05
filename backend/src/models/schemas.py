@@ -74,3 +74,10 @@ class ClassifierOutput(BaseModel):
     needs_suggestions: bool = Field(description="Whether suggestions need to re-run")
     needs_rewrite: bool = Field(description="Whether rewrite needs to re-run")
     reasoning: str = Field(description="Why these steps were selected")
+    response_message: str = Field(
+        description=(
+            "A short, conversational acknowledgement to the user explaining "
+            "what you are about to do. One sentence, friendly tone. "
+            "Example: 'Sure, I'll tighten the rewrite and refresh the suggestions to play up leadership.'"
+        ),
+    )

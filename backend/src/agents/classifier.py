@@ -25,6 +25,13 @@ Examples:
 - "the JD also requires Go experience" -> jd analysis + gap analysis + suggestions + rewrite
 - "use bullet points instead of paragraphs" -> rewrite only
 
+Alongside the booleans, write a one-sentence acknowledgement addressed to the user
+that says what you are about to do. Keep it short and friendly.
+Examples of the acknowledgement field:
+- "Sure, I'll tighten the rewrite to emphasize leadership."
+- "Got it — I'll refresh suggestions and rewrite with a Kafka focus."
+- "Will do. I'll redo gap analysis and suggestions with the new JD requirement."
+
 User message: {message}
 
 Previous context: {context}

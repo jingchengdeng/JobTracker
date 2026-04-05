@@ -94,6 +94,7 @@ def test_classifier_output_schema():
         needs_suggestions=False,
         needs_rewrite=True,
         reasoning="User asked for shorter text, only rewrite needed",
+        response_message="Sure, I'll shorten the rewrite.",
     )
     assert result.needs_rewrite is True
     assert result.needs_jd_analysis is False
