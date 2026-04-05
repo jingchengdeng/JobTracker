@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.db import get_connection
+from src.api.exception_handlers import register_exception_handlers
 
 logger = logging.getLogger("jobtracker")
 
@@ -34,6 +35,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="JobTracker AI Backend", lifespan=lifespan)
+register_exception_handlers(app)
 
 app.add_middleware(
     CORSMiddleware,
