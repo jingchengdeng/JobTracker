@@ -180,6 +180,52 @@ class TestMigrateModelConfig:
         assert result == new
 
 
+class TestExtractChatgptAccountId:
+    """Parses chatgpt_account_id from an OpenAI OAuth JWT."""
+
+    def _make_jwt(self, payload: dict) -> str:
+        import base64, json
+        header = base64.urlsafe_b64encode(b'{"alg":"none"}').rstrip(b"=").decode()
+        body = (
+            base64.urlsafe_b64encode(json.dumps(payload).encode())
+            .rstrip(b"=")
+            .decode()
+        )
+        return f"{header}.{body}.sig"
+
+    def test_extracts_account_id_from_auth_claim(self):
+        from src.models.provider import _extract_chatgpt_account_id
+
+        token = self._make_jwt(
+            {"https://api.openai.com/auth": {"chatgpt_account_id": "acc_123"}}
+        )
+        assert _extract_chatgpt_account_id(token) == "acc_123"
+
+    def test_handles_unpadded_base64(self):
+        from src.models.provider import _extract_chatgpt_account_id
+
+        # Long account id forces a payload length that needs base64 padding.
+        token = self._make_jwt(
+            {"https://api.openai.com/auth": {"chatgpt_account_id": "a" * 37}}
+        )
+        assert _extract_chatgpt_account_id(token) == "a" * 37
+
+    def test_missing_claim_raises(self):
+        import pytest
+        from src.models.provider import _extract_chatgpt_account_id
+
+        token = self._make_jwt({"some": "other"})
+        with pytest.raises(ValueError, match="chatgpt_account_id"):
+            _extract_chatgpt_account_id(token)
+
+    def test_malformed_token_raises(self):
+        import pytest
+        from src.models.provider import _extract_chatgpt_account_id
+
+        with pytest.raises(ValueError, match="chatgpt_account_id"):
+            _extract_chatgpt_account_id("not.a.jwt")
+
+
 @pytest.mark.live
 class TestLiveProviderSmoke:
     """Layer 4: Live smoke tests — only run with credentials present."""
