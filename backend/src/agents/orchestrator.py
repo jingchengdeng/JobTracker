@@ -70,7 +70,7 @@ def _wrap_step(step_type: str, step_fn):
     """Wrap a pipeline step to track status in the database."""
     def wrapped(state: ResumeAgentState) -> ResumeAgentState:
         run_id = state["run_id"]
-        round_number = state.get("round_number", 0)
+        round_number = state["round_number"]
         _update_step_status(run_id, step_type, "running", round_number=round_number)
         try:
             new_state = step_fn(state)
@@ -209,8 +209,9 @@ def run_pipeline(
     """Execute the resume analysis pipeline.
 
     Callers pass the four `needs_*` booleans explicitly. For the initial run
-    and for retries, all four default to True. For refine follow-ups, the
-    route handler calls classify_followup and passes the result here.
+    and for retries, all four default to True. For refine follow-ups, callers
+    must call `classify_followup` themselves and pass the resulting booleans +
+    round_number.
     """
     conn = get_connection()
     conn.execute(

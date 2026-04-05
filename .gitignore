@@ -57,3 +57,4 @@ data/
 
 # design docs
 docs/superpowers/
+.superpowers/
