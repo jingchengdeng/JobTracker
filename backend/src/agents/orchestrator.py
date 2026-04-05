@@ -9,7 +9,6 @@ from src.agents.resume_agent import (
     step_suggestions,
     step_rewrite,
 )
-from src.agents.classifier import classify_followup
 from src.db import get_connection
 
 
@@ -31,9 +30,12 @@ class ResumeAgentState(TypedDict):
     needs_gap_analysis: bool
     needs_suggestions: bool
     needs_rewrite: bool
+    round_number: int
 
 
-def _update_step_status(run_id: int, step_type: str, status: str, result: str | None = None):
+def _update_step_status(
+    run_id: int, step_type: str, status: str, result: str | None = None, round_number: int = 0
+):
     """Update or create a step record in the database."""
     conn = get_connection()
 
@@ -44,8 +46,9 @@ def _update_step_status(run_id: int, step_type: str, status: str, result: str | 
 
     if existing and status == "running":
         conn.execute(
-            "INSERT INTO ai_steps (run_id, step_type, status, version) VALUES (?, ?, ?, ?)",
-            (run_id, step_type, status, existing["version"] + 1),
+            "INSERT INTO ai_steps (run_id, step_type, status, version, round_number) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (run_id, step_type, status, existing["version"] + 1, round_number),
         )
     elif existing:
         conn.execute(
@@ -54,8 +57,9 @@ def _update_step_status(run_id: int, step_type: str, status: str, result: str | 
         )
     else:
         conn.execute(
-            "INSERT INTO ai_steps (run_id, step_type, status, result) VALUES (?, ?, ?, ?)",
-            (run_id, step_type, status, result),
+            "INSERT INTO ai_steps (run_id, step_type, status, result, round_number) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (run_id, step_type, status, result, round_number),
         )
 
     conn.commit()
@@ -66,7 +70,8 @@ def _wrap_step(step_type: str, step_fn):
     """Wrap a pipeline step to track status in the database."""
     def wrapped(state: ResumeAgentState) -> ResumeAgentState:
         run_id = state["run_id"]
-        _update_step_status(run_id, step_type, "running")
+        round_number = state.get("round_number", 0)
+        _update_step_status(run_id, step_type, "running", round_number=round_number)
         try:
             new_state = step_fn(state)
             result_key = {
@@ -75,10 +80,13 @@ def _wrap_step(step_type: str, step_fn):
                 "suggestions": "suggestions",
                 "rewrite": "rewrite",
             }.get(step_type, step_type)
-            _update_step_status(run_id, step_type, "completed", new_state.get(result_key))
+            _update_step_status(
+                run_id, step_type, "completed",
+                result=new_state.get(result_key), round_number=round_number,
+            )
             return new_state
         except Exception as e:
-            _update_step_status(run_id, step_type, "failed", str(e))
+            _update_step_status(run_id, step_type, "failed", result=str(e), round_number=round_number)
             raise
     return wrapped
 
@@ -189,32 +197,27 @@ def run_pipeline(
     resume_id: int,
     jd_text: str,
     resume_text: str,
-    is_followup: bool = False,
-    followup_message: str = "",
+    round_number: int = 0,
+    previous_state: dict | None = None,
     conversation_summary: str | None = None,
     recent_messages: list[dict] | None = None,
-    previous_state: dict | None = None,
+    needs_jd_analysis: bool = True,
+    needs_gap_analysis: bool = True,
+    needs_suggestions: bool = True,
+    needs_rewrite: bool = True,
 ):
-    """Execute the resume analysis pipeline."""
+    """Execute the resume analysis pipeline.
+
+    Callers pass the four `needs_*` booleans explicitly. For the initial run
+    and for retries, all four default to True. For refine follow-ups, the
+    route handler calls classify_followup and passes the result here.
+    """
     conn = get_connection()
     conn.execute(
         "UPDATE ai_runs SET status = 'running' WHERE id = ?", (run_id,)
     )
     conn.commit()
     conn.close()
-
-    needs_jd = True
-    needs_gap = True
-    needs_sug = True
-    needs_rew = True
-
-    if is_followup and followup_message:
-        context = conversation_summary or ""
-        classifier_result = classify_followup(followup_message, context)
-        needs_jd = classifier_result.needs_jd_analysis
-        needs_gap = classifier_result.needs_gap_analysis
-        needs_sug = classifier_result.needs_suggestions
-        needs_rew = classifier_result.needs_rewrite
 
     state = {
         "job_id": job_id,
@@ -230,10 +233,11 @@ def run_pipeline(
         "conversation_summary": conversation_summary,
         "recent_messages": recent_messages or [],
         "user_preferences": [],
-        "needs_jd_analysis": needs_jd,
-        "needs_gap_analysis": needs_gap,
-        "needs_suggestions": needs_sug,
-        "needs_rewrite": needs_rew,
+        "needs_jd_analysis": needs_jd_analysis,
+        "needs_gap_analysis": needs_gap_analysis,
+        "needs_suggestions": needs_suggestions,
+        "needs_rewrite": needs_rewrite,
+        "round_number": round_number,
     }
 
     try:
