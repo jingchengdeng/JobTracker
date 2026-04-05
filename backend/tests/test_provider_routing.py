@@ -266,7 +266,11 @@ class TestLiveProviderSmoke:
             pytest.skip("No openai-codex credentials configured")
         model = _create_chat_model("openai-codex", "gpt-5.4")
         result = model.invoke("Reply with the word hello")
-        assert result.content
+        assert result.content, "codex returned empty content"
+        text = result.content if isinstance(result.content, str) else str(result.content)
+        assert "<html" not in text.lower(), (
+            "codex returned an HTML page instead of a model response: " + text[:200]
+        )
 
     def test_anthropic_live(self):
         from src.auth.credentials import load_api_key
