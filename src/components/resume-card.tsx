@@ -4,14 +4,28 @@ import { FileText, Trash2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { Resume } from "@/lib/types";
+import { EmbeddingStatusBadge } from "@/components/embedding-status-badge";
+import type { EmbeddingResumeStatus, Resume } from "@/lib/types";
 
 interface ResumeCardProps {
   resume: Resume;
   onDelete: (id: number) => void;
+  embeddingStatus?: EmbeddingResumeStatus | null;
+  activeSignature?: string | null;
+  configuredSignature?: string;
+  isIndexing?: boolean;
+  onReindex?: () => void;
 }
 
-export function ResumeCard({ resume, onDelete }: ResumeCardProps) {
+export function ResumeCard({
+  resume,
+  onDelete,
+  embeddingStatus,
+  activeSignature,
+  configuredSignature,
+  isIndexing,
+  onReindex,
+}: ResumeCardProps) {
   return (
     <Card className="flex flex-col gap-3 p-4">
       <div className="flex items-start justify-between">
@@ -35,6 +49,26 @@ export function ResumeCard({ resume, onDelete }: ResumeCardProps) {
           {resume.extractedText ? "Text extracted" : "Processing..."}
         </span>
       </div>
+
+      {embeddingStatus && (
+        <div className="flex items-center gap-2">
+          <EmbeddingStatusBadge
+            resumeStatus={embeddingStatus}
+            activeSignature={activeSignature ?? null}
+            configuredSignature={configuredSignature ?? ""}
+            isIndexing={isIndexing ?? false}
+          />
+          {onReindex && embeddingStatus.last_index_status !== "ok" && (
+            <button
+              type="button"
+              onClick={onReindex}
+              className="text-xs text-blue-600 hover:underline"
+            >
+              Reindex
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="flex gap-2">
         <Button
