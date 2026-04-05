@@ -14,7 +14,7 @@ describe("useEmbeddingStatus", () => {
   });
 
   it("fetches status on mount", async () => {
-    (global.fetch as any).mockResolvedValueOnce({
+    (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       json: async () => ({
         active_signature: "openai__m",
@@ -32,7 +32,7 @@ describe("useEmbeddingStatus", () => {
   });
 
   it("polls every 2s when a job is active", async () => {
-    (global.fetch as any).mockResolvedValue({
+    (global.fetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
       ok: true,
       json: async () => ({
         active_signature: null,
@@ -69,7 +69,7 @@ describe("useEmbeddingStatus", () => {
 
   it("stops polling when job completes", async () => {
     let call = 0;
-    (global.fetch as any).mockImplementation(async () => {
+    (global.fetch as unknown as ReturnType<typeof vi.fn>).mockImplementation(async () => {
       call++;
       return {
         ok: true,
