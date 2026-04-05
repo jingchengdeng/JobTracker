@@ -1,33 +1,27 @@
-import os
 import re
-from pathlib import Path
 
-import chromadb
+from src.memory.collection_resolver import active_collection, collection_for_signature
 
-from src.services.embeddings import get_embedding_function
-
-VECTORDB_DIR = os.environ.get(
-    "VECTORDB_PATH",
-    str(Path(__file__).parent.parent.parent.parent / "data" / "vectordb"),
-)
-
-COLLECTION_NAME = "resume_chunks"
-
-
-def _get_collection():
-    client = chromadb.PersistentClient(path=VECTORDB_DIR)
-    ef = get_embedding_function()
-    return client.get_or_create_collection(
-        name=COLLECTION_NAME,
-        embedding_function=ef,
-    )
+COLLECTION_NAME = "resume_chunks"  # legacy (pre-signature) collection name
 
 
 def index_resume(resume_id: int, resume_name: str, extracted_text: str):
-    """Chunk a resume by role/entry and index each chunk in ChromaDB."""
-    collection = _get_collection()
+    """Index a resume into the active collection.
 
-    # Remove old chunks for this resume
+    No-op if no active signature yet (first-run before any reindex). The
+    caller is expected to trigger a reindex after initial upload in that case.
+    """
+    col = active_collection()
+    if col is None:
+        return
+    index_resume_into(col, resume_id, resume_name, extracted_text)
+
+
+def index_resume_into(collection, resume_id: int, resume_name: str, extracted_text: str):
+    """Index a resume into a specific Chroma collection.
+
+    Removes any existing chunks for this resume_id first, then adds fresh chunks.
+    """
     try:
         existing = collection.get(where={"resume_id": resume_id})
         if existing["ids"]:
@@ -42,11 +36,9 @@ def index_resume(resume_id: int, resume_name: str, extracted_text: str):
     ids = []
     documents = []
     metadatas = []
-
     for i, chunk in enumerate(chunks):
         chunk_id = f"resume-{resume_id}-chunk-{i}"
         enriched = f"{resume_name} -- {chunk['section']} -- {chunk['text']}"
-
         ids.append(chunk_id)
         documents.append(enriched)
         metadatas.append({
@@ -60,26 +52,25 @@ def index_resume(resume_id: int, resume_name: str, extracted_text: str):
 
 
 def delete_resume_chunks(resume_id: int) -> int:
-    """Delete all chunks for a resume. Returns the number of chunks removed."""
-    collection = _get_collection()
-    existing = collection.get(where={"resume_id": resume_id})
+    """Delete all chunks for a resume. Returns the number removed."""
+    col = active_collection()
+    if col is None:
+        return 0
+    existing = col.get(where={"resume_id": resume_id})
     ids = existing["ids"] if existing else []
     if ids:
-        collection.delete(ids=ids)
+        col.delete(ids=ids)
     return len(ids)
 
 
 def query_resume_corpus(query: str, n_results: int = 10, filters: dict | None = None):
-    """Query the resume corpus for relevant experience chunks."""
-    collection = _get_collection()
+    """Query the active collection for relevant experience chunks."""
+    col = active_collection()
+    if col is None:
+        return []
 
     where = filters if filters else None
-
-    results = collection.query(
-        query_texts=[query],
-        n_results=n_results,
-        where=where,
-    )
+    results = col.query(query_texts=[query], n_results=n_results, where=where)
 
     chunks = []
     if results and results["documents"]:
@@ -91,16 +82,11 @@ def query_resume_corpus(query: str, n_results: int = 10, filters: dict | None = 
                 "section_type": meta.get("section_type", ""),
                 "distance": results["distances"][0][i] if results["distances"] else None,
             })
-
     return chunks
 
 
 def _chunk_resume(text: str) -> list[dict]:
-    """Split resume text into chunks by role/entry.
-
-    Heuristic: split on lines that look like role headers (contain date patterns,
-    company names, or section headers). Falls back to paragraph-level splitting.
-    """
+    """Split resume text into chunks by role/entry."""
     lines = text.split("\n")
     chunks = []
     current_section = "general"
