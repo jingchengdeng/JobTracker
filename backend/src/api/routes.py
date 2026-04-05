@@ -1,5 +1,6 @@
 import asyncio
 import json as _json
+import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -16,6 +17,8 @@ from src.memory.conversation import (
     summarize_old_rounds,
 )
 from src.models.provider import get_chat_model
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
@@ -206,14 +209,15 @@ async def send_message(run_id: int, req: SendMessageRequest):
 
     try:
         classifier_result = classify_followup(req.content, summary or "")
+    except Exception:
+        ack_text = "Working on your refine..."
+        needs_jd = needs_gap = needs_sug = needs_rew = True
+    else:
         ack_text = classifier_result.response_message
         needs_jd = classifier_result.needs_jd_analysis
         needs_gap = classifier_result.needs_gap_analysis
         needs_sug = classifier_result.needs_suggestions
         needs_rew = classifier_result.needs_rewrite
-    except Exception:
-        ack_text = "Working on your refine..."
-        needs_jd = needs_gap = needs_sug = needs_rew = True
 
     save_message(run_id, "assistant", ack_text, round_num)
 
@@ -231,11 +235,16 @@ async def send_message(run_id: int, req: SendMessageRequest):
         if step["step_type"] not in previous_state:
             previous_state[step["step_type"]] = step["result"]
 
+    job_id_val = run["job_id"]
+    resume_id_val = run["resume_id"]
+    jd_text_val = job["description"]
+    resume_text_val = resume["extracted_text"]
+
     asyncio.get_event_loop().run_in_executor(
         None,
         lambda: _run_followup_pipeline(
-            run_id, run["job_id"], run["resume_id"],
-            job["description"], resume["extracted_text"],
+            run_id, job_id_val, resume_id_val,
+            jd_text_val, resume_text_val,
             summary, recent, previous_state, round_num,
             needs_jd, needs_gap, needs_sug, needs_rew,
         ),
@@ -269,8 +278,8 @@ def _run_followup_pipeline(
     try:
         llm = get_chat_model()
         summarize_old_rounds(run_id, llm)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("summarize_old_rounds failed (non-fatal): %s", exc)
 
 
 @router.get("/runs/{run_id}/messages")

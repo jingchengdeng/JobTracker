@@ -71,6 +71,13 @@ def test_followup_saves_user_and_ack_with_same_round(test_db):
     assert msgs[1] == ("user", "add leadership", 1)
     assert msgs[2] == ("assistant", "Sure, I'll tighten the rewrite.", 1)
 
+    mock_pipeline.assert_called_once()
+    call_kwargs = mock_pipeline.call_args.kwargs
+    assert call_kwargs["needs_suggestions"] is True
+    assert call_kwargs["needs_rewrite"] is True
+    assert call_kwargs["needs_jd_analysis"] is False
+    assert call_kwargs["needs_gap_analysis"] is False
+
 
 def test_followup_falls_back_when_classifier_fails(test_db):
     with patch("src.api.routes.classify_followup", side_effect=Exception("boom")), \
