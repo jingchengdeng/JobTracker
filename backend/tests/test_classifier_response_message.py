@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from src.models.schemas import ClassifierOutput
 
 
@@ -14,8 +17,6 @@ def test_classifier_output_has_response_message_field():
 
 
 def test_classifier_output_rejects_missing_response_message():
-    import pytest
-    from pydantic import ValidationError
     with pytest.raises(ValidationError):
         ClassifierOutput(
             needs_jd_analysis=False,
