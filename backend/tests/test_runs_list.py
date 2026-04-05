@@ -105,6 +105,14 @@ def test_list_match_score_null_when_gap_result_malformed(test_db):
     assert data[0]["match_score"] is None
 
 
+def test_list_match_score_null_when_gap_result_missing_key(test_db):
+    gap = json.dumps({"items": []})
+    _insert_run(test_db, 1, 10, "completed", "2026-04-05T10:00:00", gap_result=gap)
+    client = TestClient(app)
+    data = client.get("/api/jobs/1/runs").json()
+    assert data[0]["match_score"] is None
+
+
 def test_list_empty_for_job_with_no_runs(test_db):
     client = TestClient(app)
     resp = client.get("/api/jobs/1/runs")
