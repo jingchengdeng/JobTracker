@@ -1,4 +1,5 @@
 import asyncio
+import json as _json
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -103,6 +104,53 @@ async def create_run(req: CreateRunRequest):
     )
 
     return {"run_id": run_id, "status": "pending"}
+
+
+def _extract_match_score(conn, run_id: int) -> int | None:
+    """Return overall_match_score from the latest completed gap_analysis step."""
+    row = conn.execute(
+        "SELECT result FROM ai_steps "
+        "WHERE run_id = ? AND step_type = 'gap_analysis' AND status = 'completed' "
+        "ORDER BY version DESC LIMIT 1",
+        (run_id,),
+    ).fetchone()
+    if not row or not row["result"]:
+        return None
+    try:
+        data = _json.loads(row["result"])
+    except (ValueError, TypeError):
+        return None
+    score = data.get("overall_match_score") if isinstance(data, dict) else None
+    return score if isinstance(score, int) else None
+
+
+@router.get("/jobs/{job_id}/runs")
+async def list_runs_for_job(job_id: int):
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT r.id, r.status, r.error, r.created_at, r.completed_at, "
+            "r.resume_id, res.name AS resume_name, res.version AS resume_version "
+            "FROM ai_runs r JOIN resumes res ON res.id = r.resume_id "
+            "WHERE r.job_id = ? ORDER BY r.created_at DESC",
+            (job_id,),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "resume_id": r["resume_id"],
+                "resume_name": r["resume_name"],
+                "resume_version": r["resume_version"],
+                "status": r["status"],
+                "error": r["error"],
+                "match_score": _extract_match_score(conn, r["id"]),
+                "created_at": r["created_at"],
+                "completed_at": r["completed_at"],
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
 
 
 @router.get("/runs/{run_id}")
