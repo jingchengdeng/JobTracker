@@ -1,8 +1,16 @@
+import logging
+import os
 import re
+from pathlib import Path
+
+import chromadb
 
 from src.db import get_connection
 from src.memory.collection_resolver import active_collection, collection_for_signature
 from src.memory.embedding_state import get_active_signature
+from src.memory.signatures import collection_name_for
+
+logger = logging.getLogger("jobtracker.rag")
 
 COLLECTION_NAME = "resume_chunks"  # legacy (pre-signature) collection name
 
@@ -182,3 +190,81 @@ def _chunk_resume(text: str) -> list[dict]:
         })
 
     return [c for c in chunks if len(c["text"]) > 20]
+
+
+def reconcile_resume_index_state() -> None:
+    """Heal drift between SQL per-resume index state and real Chroma contents.
+
+    Run at startup. Two passes:
+      1. Any resume whose recorded signature points at a collection that no
+         longer exists gets its signature/status cleared (NULL).
+      2. Any resume with a NULL signature whose chunks DO exist in the active
+         collection is marked ok with the active signature.
+    """
+    vectordb_path = os.environ.get(
+        "VECTORDB_PATH",
+        str(Path(__file__).parent.parent.parent.parent / "data" / "vectordb"),
+    )
+    try:
+        client = chromadb.PersistentClient(path=vectordb_path)
+        existing = {c.name for c in client.list_collections()}
+    except Exception as exc:
+        logger.warning("reconcile: could not list Chroma collections: %s", exc)
+        existing = set()
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT id, last_index_signature FROM resumes"
+        ).fetchall()
+
+        # Phase 1: clear orphan signatures
+        cleared = 0
+        for r in rows:
+            sig = r["last_index_signature"]
+            if sig is None:
+                continue
+            if collection_name_for(sig) not in existing:
+                conn.execute(
+                    "UPDATE resumes SET last_index_signature = NULL, "
+                    "last_index_status = NULL, last_index_error = NULL WHERE id = ?",
+                    (r["id"],),
+                )
+                cleared += 1
+        if cleared:
+            conn.commit()
+            logger.info("reconcile: cleared %d orphan resume signature(s)", cleared)
+
+        # Phase 2: heal NULL signatures against active collection
+        active_sig = get_active_signature()
+        if active_sig is None:
+            return
+        active_name = collection_name_for(active_sig)
+        if active_name not in existing:
+            return
+        try:
+            col = client.get_collection(name=active_name)
+            result = col.get(include=["metadatas"])
+        except Exception as exc:
+            logger.warning("reconcile: could not read active collection: %s", exc)
+            return
+
+        resume_ids_in_chroma: set[int] = set()
+        for md in result.get("metadatas") or []:
+            if md and md.get("resume_id") is not None:
+                resume_ids_in_chroma.add(md["resume_id"])
+        if not resume_ids_in_chroma:
+            return
+
+        placeholders = ",".join("?" * len(resume_ids_in_chroma))
+        cur = conn.execute(
+            f"UPDATE resumes SET last_index_signature = ?, "
+            f"last_index_status = 'ok', last_index_error = NULL "
+            f"WHERE last_index_signature IS NULL AND id IN ({placeholders})",
+            (active_sig, *resume_ids_in_chroma),
+        )
+        if cur.rowcount:
+            conn.commit()
+            logger.info("reconcile: healed %d NULL resume signature(s)", cur.rowcount)
+    finally:
+        conn.close()

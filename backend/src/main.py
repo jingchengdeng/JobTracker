@@ -40,6 +40,12 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("Legacy embedding migration skipped: %s", exc)
 
+    try:
+        from src.memory.rag import reconcile_resume_index_state
+        reconcile_resume_index_state()
+    except Exception as exc:
+        logger.warning("Resume index reconciliation skipped: %s", exc)
+
     yield
 
 
