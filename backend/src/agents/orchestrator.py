@@ -160,6 +160,29 @@ def build_graph() -> StateGraph:
 workflow = build_graph().compile()
 
 
+def _format_pipeline_error(exc: Exception) -> str:
+    """Shorten provider errors so the UI doesn't render raw HTML bodies.
+
+    Some providers (e.g. openai-codex -> chatgpt.com) respond with a Cloudflare
+    challenge page when the caller isn't authenticated the way they expect. The
+    OpenAI SDK includes the response body in the exception string, which then
+    leaks into ai_runs.error and the UI. Detect HTML bodies and replace with
+    a short, actionable message.
+    """
+    msg = str(exc)
+    lowered = msg.lower()
+    if "<html" in lowered or "cloudflare" in lowered or "cf_chl_opt" in lowered:
+        return (
+            "Provider returned a challenge page instead of an API response. "
+            "The configured provider appears to be unreachable from this app. "
+            "Switch the default chat provider in Settings to one with a valid API key."
+        )
+    # Keep errors to a reasonable length in the UI.
+    if len(msg) > 500:
+        return msg[:500] + "..."
+    return msg
+
+
 def run_pipeline(
     run_id: int,
     job_id: int,
@@ -230,7 +253,7 @@ def run_pipeline(
         conn = get_connection()
         conn.execute(
             "UPDATE ai_runs SET status = 'failed', error = ? WHERE id = ?",
-            (str(e), run_id),
+            (_format_pipeline_error(e), run_id),
         )
         conn.commit()
         conn.close()

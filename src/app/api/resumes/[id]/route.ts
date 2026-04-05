@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { resumes } from "@/db/schema";
-import { eq } from "drizzle-orm";
+import { resumes, aiRuns, aiSteps, aiMessages } from "@/db/schema";
+import { eq, inArray } from "drizzle-orm";
 import fs from "fs";
 import path from "path";
 
@@ -36,7 +36,25 @@ export async function DELETE(
     fs.unlinkSync(filePath);
   }
 
-  db.delete(resumes).where(eq(resumes.id, Number(id))).run();
+  // Cascade delete dependent AI records so the FK constraint on ai_runs.resume_id
+  // doesn't block removal. Wrap in a transaction for atomicity.
+  const resumeId = Number(id);
+  db.transaction((tx) => {
+    const runs = tx
+      .select({ id: aiRuns.id })
+      .from(aiRuns)
+      .where(eq(aiRuns.resumeId, resumeId))
+      .all();
+    const runIds = runs.map((r) => r.id);
+
+    if (runIds.length > 0) {
+      tx.delete(aiMessages).where(inArray(aiMessages.runId, runIds)).run();
+      tx.delete(aiSteps).where(inArray(aiSteps.runId, runIds)).run();
+      tx.delete(aiRuns).where(inArray(aiRuns.id, runIds)).run();
+    }
+
+    tx.delete(resumes).where(eq(resumes.id, resumeId)).run();
+  });
 
   return NextResponse.json({ success: true });
 }
