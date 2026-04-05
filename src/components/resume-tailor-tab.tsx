@@ -246,12 +246,13 @@ export function ResumeTailorTab({ job }: ResumeTailorTabProps) {
         </div>
 
         <div className="flex-1 space-y-6 overflow-y-auto">
-          {rounds.map((r) => (
+          {rounds.map((r, i) => (
             <RoundBlock
               key={r.round_number}
               round={r}
               expandedStepIds={expandedStepIds}
               onToggleStep={toggleStep}
+              thinking={polling && i === rounds.length - 1 && !!r.user_message && !r.ack_message}
             />
           ))}
 

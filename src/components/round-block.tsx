@@ -7,9 +7,10 @@ interface RoundBlockProps {
   round: Round;
   expandedStepIds: Set<number>;
   onToggleStep: (stepId: number) => void;
+  thinking?: boolean;
 }
 
-export function RoundBlock({ round, expandedStepIds, onToggleStep }: RoundBlockProps) {
+export function RoundBlock({ round, expandedStepIds, onToggleStep, thinking }: RoundBlockProps) {
   const label = round.round_number === 0 ? "Initial analysis" : `Round ${round.round_number}`;
 
   return (
@@ -22,11 +23,23 @@ export function RoundBlock({ round, expandedStepIds, onToggleStep }: RoundBlockP
           <span className="font-medium">You:</span> {round.user_message.content}
         </div>
       )}
-      {round.ack_message && (
+      {round.ack_message ? (
         <div className="max-w-[80%] rounded bg-muted px-3 py-2 text-sm text-muted-foreground">
           <span className="font-medium">AI:</span> {round.ack_message.content}
         </div>
-      )}
+      ) : thinking ? (
+        <div className="max-w-[80%] rounded bg-muted px-3 py-2 text-sm text-muted-foreground">
+          <span className="font-medium">AI:</span>{" "}
+          <span className="inline-flex items-center gap-1">
+            <span className="animate-pulse">Thinking</span>
+            <span className="inline-flex gap-0.5">
+              <span className="animate-bounce [animation-delay:0ms]">.</span>
+              <span className="animate-bounce [animation-delay:150ms]">.</span>
+              <span className="animate-bounce [animation-delay:300ms]">.</span>
+            </span>
+          </span>
+        </div>
+      ) : null}
       {round.steps.map((step) => (
         <StepCard
           key={step.id}
