@@ -43,8 +43,10 @@ app.add_middleware(
 )
 
 from src.api.routes import router
+from src.api.embedding_routes import router as embedding_router
 
 app.include_router(router)
+app.include_router(embedding_router)
 
 
 @app.get("/api/health")
