@@ -112,7 +112,40 @@ export interface Resume {
   filePath: string;
   fileType: ResumeFileType;
   extractedText: string | null;
+  lastIndexSignature: string | null;
+  lastIndexStatus: IndexStatus | null;
+  lastIndexError: string | null;
   createdAt: string;
+}
+
+export const INDEX_STATUSES = ["ok", "failed", "pending"] as const;
+export type IndexStatus = (typeof INDEX_STATUSES)[number];
+
+export interface EmbeddingResumeStatus {
+  id: number;
+  name: string;
+  last_index_signature: string | null;
+  last_index_status: IndexStatus | null;
+  last_index_error: string | null;
+}
+
+export interface ReindexJob {
+  job_id: string;
+  status: "running" | "completed" | "failed";
+  target_signature: string;
+  started_at: string;
+  completed_at: string | null;
+  total: number;
+  succeeded: number[];
+  failed: { resume_id: number | null; error: string }[];
+  current_resume_id: number | null;
+}
+
+export interface EmbeddingStatus {
+  active_signature: string | null;
+  configured_signature: string;
+  resumes: EmbeddingResumeStatus[];
+  active_job: ReindexJob | null;
 }
 
 export interface UserPreference {
