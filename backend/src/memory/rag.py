@@ -59,6 +59,16 @@ def index_resume(resume_id: int, resume_name: str, extracted_text: str):
     collection.add(ids=ids, documents=documents, metadatas=metadatas)
 
 
+def delete_resume_chunks(resume_id: int) -> int:
+    """Delete all chunks for a resume. Returns the number of chunks removed."""
+    collection = _get_collection()
+    existing = collection.get(where={"resume_id": resume_id})
+    ids = existing["ids"] if existing else []
+    if ids:
+        collection.delete(ids=ids)
+    return len(ids)
+
+
 def query_resume_corpus(query: str, n_results: int = 10, filters: dict | None = None):
     """Query the resume corpus for relevant experience chunks."""
     collection = _get_collection()

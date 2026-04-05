@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from src.db import get_connection
-from src.memory.rag import index_resume
+from src.memory.rag import index_resume, delete_resume_chunks
 from src.services.text_extract import extract_text
 from src.agents.orchestrator import run_pipeline
 from src.memory.conversation import (
@@ -48,6 +48,12 @@ async def extract_resume_text(req: ExtractTextRequest):
     index_resume(req.resume_id, resume_name, text)
 
     return {"resume_id": req.resume_id, "char_count": len(text)}
+
+
+@router.delete("/resumes/{resume_id}/chunks")
+async def delete_resume_chunks_route(resume_id: int):
+    removed = delete_resume_chunks(resume_id)
+    return {"resume_id": resume_id, "removed": removed}
 
 
 class CreateRunRequest(BaseModel):

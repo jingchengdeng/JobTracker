@@ -36,9 +36,20 @@ export async function DELETE(
     fs.unlinkSync(filePath);
   }
 
+  const resumeId = Number(id);
+
+  // Drop vector chunks from the Python RAG store. Non-fatal: if the backend is
+  // down we'd rather finish the DB cleanup than leave a half-deleted resume.
+  try {
+    await fetch(`http://localhost:8000/api/resumes/${resumeId}/chunks`, {
+      method: "DELETE",
+    });
+  } catch {
+    // backend unreachable, orphans will need manual cleanup
+  }
+
   // Cascade delete dependent AI records so the FK constraint on ai_runs.resume_id
   // doesn't block removal. Wrap in a transaction for atomicity.
-  const resumeId = Number(id);
   db.transaction((tx) => {
     const runs = tx
       .select({ id: aiRuns.id })
