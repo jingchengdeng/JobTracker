@@ -42,6 +42,7 @@ def mock_db(test_db, monkeypatch):
         return conn
     monkeypatch.setattr("src.memory.embedding_state.get_connection", make_conn)
     monkeypatch.setattr("src.memory.reindex.get_connection", make_conn)
+    monkeypatch.setattr("src.memory.rag.get_connection", make_conn)
     _jobs.clear()
     ensure_row()
     yield

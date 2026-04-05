@@ -8,7 +8,7 @@ from typing import Optional
 from src.db import get_connection
 from src.memory.collection_resolver import collection_for_signature
 from src.memory.embedding_state import set_active_signature, get_active_signature
-from src.memory.rag import index_resume_into
+from src.memory.rag import index_resume_into, mark_resume_failed, mark_resume_ok
 from src.memory.retry import with_retry
 
 logger = logging.getLogger("jobtracker.reindex")
@@ -105,7 +105,7 @@ async def _run_job(
     for r in resumes:
         job.current_resume_id = r["id"]
         if not r["extracted_text"]:
-            _mark_resume_failed(r["id"], "No extracted text on file")
+            mark_resume_failed(r["id"], "No extracted text on file")
             job.failed.append({"resume_id": r["id"], "error": "No extracted text on file"})
             continue
         try:
@@ -114,11 +114,11 @@ async def _run_job(
                     index_resume_into, collection, r["id"], r["name"], r["extracted_text"]
                 )
             await with_retry(op, retries=3, backoff=(1.0, 2.0, 4.0))
-            _mark_resume_ok(r["id"], job.target_signature)
+            mark_resume_ok(r["id"], job.target_signature)
             job.succeeded.append(r["id"])
         except Exception as exc:
             logger.warning("Resume %s reindex failed: %s", r["id"], exc)
-            _mark_resume_failed(r["id"], str(exc))
+            mark_resume_failed(r["id"], str(exc))
             job.failed.append({"resume_id": r["id"], "error": str(exc)})
 
     job.current_resume_id = None
@@ -167,32 +167,6 @@ def _fetch_resumes(resume_ids: Optional[list[int]]) -> list[dict]:
                 tuple(resume_ids),
             ).fetchall()
         return [dict(r) for r in rows]
-    finally:
-        conn.close()
-
-
-def _mark_resume_ok(resume_id: int, signature: str) -> None:
-    conn = get_connection()
-    try:
-        conn.execute(
-            "UPDATE resumes SET last_index_signature = ?, last_index_status = 'ok', "
-            "last_index_error = NULL WHERE id = ?",
-            (signature, resume_id),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
-def _mark_resume_failed(resume_id: int, error: str) -> None:
-    conn = get_connection()
-    try:
-        conn.execute(
-            "UPDATE resumes SET last_index_status = 'failed', last_index_error = ? "
-            "WHERE id = ?",
-            (error, resume_id),
-        )
-        conn.commit()
     finally:
         conn.close()
 

@@ -1,12 +1,14 @@
 import re
 
+from src.db import get_connection
 from src.memory.collection_resolver import active_collection, collection_for_signature
+from src.memory.embedding_state import get_active_signature
 
 COLLECTION_NAME = "resume_chunks"  # legacy (pre-signature) collection name
 
 
 def index_resume(resume_id: int, resume_name: str, extracted_text: str):
-    """Index a resume into the active collection.
+    """Index a resume into the active collection and persist its state.
 
     No-op if no active signature yet (first-run before any reindex). The
     caller is expected to trigger a reindex after initial upload in that case.
@@ -14,7 +16,40 @@ def index_resume(resume_id: int, resume_name: str, extracted_text: str):
     col = active_collection()
     if col is None:
         return
-    index_resume_into(col, resume_id, resume_name, extracted_text)
+    active_sig = get_active_signature()
+    try:
+        index_resume_into(col, resume_id, resume_name, extracted_text)
+    except Exception as exc:
+        mark_resume_failed(resume_id, str(exc))
+        raise
+    if active_sig is not None:
+        mark_resume_ok(resume_id, active_sig)
+
+
+def mark_resume_ok(resume_id: int, signature: str) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE resumes SET last_index_signature = ?, last_index_status = 'ok', "
+            "last_index_error = NULL WHERE id = ?",
+            (signature, resume_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def mark_resume_failed(resume_id: int, error: str) -> None:
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE resumes SET last_index_status = 'failed', last_index_error = ? "
+            "WHERE id = ?",
+            (error, resume_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def index_resume_into(collection, resume_id: int, resume_name: str, extracted_text: str):
