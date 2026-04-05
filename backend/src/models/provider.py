@@ -31,6 +31,10 @@ def _extract_chatgpt_account_id(jwt_token: str) -> str:
     return account_id
 
 
+_APP_ORIGINATOR = "jobtracker"
+_APP_VERSION = "0.1.0"
+
+
 def _create_chat_model(provider_id: str, model: str) -> BaseChatModel:
     provider = get_provider(provider_id)
     profile = load_credential(provider_id)
@@ -50,6 +54,16 @@ def _create_chat_model(provider_id: str, model: str) -> BaseChatModel:
             kwargs["base_url"] = provider["baseUrl"]
         if provider["api"] in ("responses", "codex-responses"):
             kwargs["use_responses_api"] = True
+        if provider["api"] == "codex-responses":
+            account_id = _extract_chatgpt_account_id(api_key)
+            kwargs["streaming"] = True
+            kwargs["default_headers"] = {
+                "chatgpt-account-id": account_id,
+                "originator": _APP_ORIGINATOR,
+                "version": _APP_VERSION,
+                "User-Agent": f"{_APP_ORIGINATOR}/{_APP_VERSION}",
+                "OpenAI-Beta": "responses=experimental",
+            }
         return ChatOpenAI(**kwargs)
 
     if provider["client"] == "anthropic":

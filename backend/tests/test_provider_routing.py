@@ -29,19 +29,35 @@ class TestCreateChatModel:
 
     @patch("src.models.provider.load_credential")
     @patch("src.models.provider.ChatOpenAI")
-    def test_openai_codex_uses_responses_api_with_base_url(self, mock_chat, mock_cred):
+    def test_openai_codex_sends_attribution_headers(self, mock_chat, mock_cred):
+        import base64, json
         from src.models.provider import _create_chat_model
 
+        claims = {"https://api.openai.com/auth": {"chatgpt_account_id": "acc_xyz"}}
+        body = (
+            base64.urlsafe_b64encode(json.dumps(claims).encode())
+            .rstrip(b"=")
+            .decode()
+        )
+        token = f"hdr.{body}.sig"
         mock_cred.return_value = _make_profile(
-            type_="oauth", provider="openai-codex", key=None, access="codex-token"
+            type_="oauth", provider="openai-codex", key=None, access=token
         )
         _create_chat_model("openai-codex", "gpt-5.4")
-        mock_chat.assert_called_once_with(
-            model="gpt-5.4",
-            api_key="codex-token",
-            base_url="https://chatgpt.com/backend-api",
-            use_responses_api=True,
-        )
+
+        assert mock_chat.call_count == 1
+        kwargs = mock_chat.call_args.kwargs
+        assert kwargs["model"] == "gpt-5.4"
+        assert kwargs["api_key"] == token
+        assert kwargs["base_url"] == "https://chatgpt.com/backend-api"
+        assert kwargs["use_responses_api"] is True
+        assert kwargs["streaming"] is True
+        headers = kwargs["default_headers"]
+        assert headers["chatgpt-account-id"] == "acc_xyz"
+        assert headers["originator"] == "jobtracker"
+        assert headers["OpenAI-Beta"] == "responses=experimental"
+        assert headers["User-Agent"].startswith("jobtracker/")
+        assert headers["version"] == "0.1.0"
 
     @patch("src.models.provider.load_credential")
     @patch("src.models.provider.ChatAnthropic")
