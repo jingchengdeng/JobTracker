@@ -1,14 +1,14 @@
 import asyncio
-import json
-import os
-from pathlib import Path
+import json as _json
+import logging
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from src.db import get_connection
-from src.memory.rag import index_resume
+from src.memory.rag import index_resume, delete_resume_chunks
 from src.services.text_extract import extract_text
 from src.agents.orchestrator import run_pipeline
+from src.agents.classifier import classify_followup
 from src.memory.conversation import (
     save_message,
     get_recent_messages,
@@ -17,6 +17,8 @@ from src.memory.conversation import (
     summarize_old_rounds,
 )
 from src.models.provider import get_chat_model
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
 
@@ -51,6 +53,12 @@ async def extract_resume_text(req: ExtractTextRequest):
     index_resume(req.resume_id, resume_name, text)
 
     return {"resume_id": req.resume_id, "char_count": len(text)}
+
+
+@router.delete("/resumes/{resume_id}/chunks")
+async def delete_resume_chunks_route(resume_id: int):
+    removed = delete_resume_chunks(resume_id)
+    return {"resume_id": resume_id, "removed": removed}
 
 
 class CreateRunRequest(BaseModel):
@@ -91,15 +99,64 @@ async def create_run(req: CreateRunRequest):
 
     asyncio.get_event_loop().run_in_executor(
         None,
-        run_pipeline,
-        run_id,
-        req.job_id,
-        req.resume_id,
-        job["description"],
-        resume["extracted_text"],
+        lambda: run_pipeline(
+            run_id=run_id,
+            job_id=req.job_id,
+            resume_id=req.resume_id,
+            jd_text=job["description"],
+            resume_text=resume["extracted_text"],
+            round_number=0,
+        ),
     )
 
     return {"run_id": run_id, "status": "pending"}
+
+
+def _extract_match_score(conn, run_id: int) -> int | None:
+    """Return overall_match_score from the latest completed gap_analysis step."""
+    row = conn.execute(
+        "SELECT result FROM ai_steps "
+        "WHERE run_id = ? AND step_type = 'gap_analysis' AND status = 'completed' "
+        "ORDER BY version DESC LIMIT 1",
+        (run_id,),
+    ).fetchone()
+    if not row or not row["result"]:
+        return None
+    try:
+        data = _json.loads(row["result"])
+    except (ValueError, TypeError):
+        return None
+    score = data.get("overall_match_score") if isinstance(data, dict) else None
+    return score if isinstance(score, int) else None
+
+
+@router.get("/jobs/{job_id}/runs")
+async def list_runs_for_job(job_id: int):
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT r.id, r.status, r.error, r.created_at, r.completed_at, "
+            "r.resume_id, res.name AS resume_name, res.version AS resume_version "
+            "FROM ai_runs r JOIN resumes res ON res.id = r.resume_id "
+            "WHERE r.job_id = ? ORDER BY r.created_at DESC",
+            (job_id,),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "resume_id": r["resume_id"],
+                "resume_name": r["resume_name"],
+                "resume_version": r["resume_version"],
+                "status": r["status"],
+                "error": r["error"],
+                "match_score": _extract_match_score(conn, r["id"]),
+                "created_at": r["created_at"],
+                "completed_at": r["completed_at"],
+            }
+            for r in rows
+        ]
+    finally:
+        conn.close()
 
 
 @router.get("/runs/{run_id}")
@@ -148,8 +205,51 @@ async def send_message(run_id: int, req: SendMessageRequest):
     round_num = get_current_round(run_id)
     save_message(run_id, "user", req.content, round_num)
 
-    recent = get_recent_messages(run_id)
+    conn = get_connection()
+    conn.execute("UPDATE ai_runs SET status = 'running' WHERE id = ?", (run_id,))
+    conn.commit()
+    conn.close()
+
+    job_id_val = run["job_id"]
+    resume_id_val = run["resume_id"]
+    jd_text_val = job["description"]
+    resume_text_val = resume["extracted_text"]
+    user_content = req.content
+
+    asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: _classify_and_run_pipeline(
+            run_id, job_id_val, resume_id_val,
+            jd_text_val, resume_text_val,
+            user_content, round_num,
+        ),
+    )
+
+    return {"status": "running", "round": round_num}
+
+
+def _classify_and_run_pipeline(
+    run_id, job_id, resume_id, jd_text, resume_text,
+    user_content, round_num,
+):
+    """Classify the follow-up, save the ack, then run the pipeline."""
     summary = get_conversation_summary(run_id)
+
+    try:
+        classifier_result = classify_followup(user_content, summary or "")
+    except Exception:
+        ack_text = "Working on your refine..."
+        needs_jd = needs_gap = needs_sug = needs_rew = True
+    else:
+        ack_text = classifier_result.response_message
+        needs_jd = classifier_result.needs_jd_analysis
+        needs_gap = classifier_result.needs_gap_analysis
+        needs_sug = classifier_result.needs_suggestions
+        needs_rew = classifier_result.needs_rewrite
+
+    save_message(run_id, "assistant", ack_text, round_num)
+
+    recent = get_recent_messages(run_id)
 
     conn = get_connection()
     steps = conn.execute(
@@ -163,52 +263,38 @@ async def send_message(run_id: int, req: SendMessageRequest):
         if step["step_type"] not in previous_state:
             previous_state[step["step_type"]] = step["result"]
 
-    asyncio.get_event_loop().run_in_executor(
-        None,
-        lambda: _run_followup(
-            run_id, run["job_id"], run["resume_id"],
-            job["description"], resume["extracted_text"],
-            req.content, summary, recent, previous_state, round_num,
-        ),
-    )
-
-    return {"status": "running", "round": round_num}
-
-
-def _run_followup(
-    run_id, job_id, resume_id, jd_text, resume_text,
-    message, summary, recent, previous_state, round_num,
-):
-    """Run the pipeline for a follow-up message, then save the response and summarize."""
-    result = run_pipeline(
-        run_id=run_id,
-        job_id=job_id,
-        resume_id=resume_id,
-        jd_text=jd_text,
-        resume_text=resume_text,
-        is_followup=True,
-        followup_message=message,
-        conversation_summary=summary,
-        recent_messages=recent,
-        previous_state=previous_state,
-    )
-
-    response_parts = []
-    if result.get("rewrite"):
-        response_parts.append("Rewrite updated.")
-    if result.get("suggestions"):
-        response_parts.append("Suggestions updated.")
-    if result.get("gap_analysis"):
-        response_parts.append("Gap analysis updated.")
-
-    assistant_content = " ".join(response_parts) if response_parts else "Pipeline completed."
-    save_message(run_id, "assistant", assistant_content, round_num)
+    try:
+        run_pipeline(
+            run_id=run_id,
+            job_id=job_id,
+            resume_id=resume_id,
+            jd_text=jd_text,
+            resume_text=resume_text,
+            round_number=round_num,
+            previous_state=previous_state,
+            conversation_summary=summary,
+            recent_messages=recent,
+            needs_jd_analysis=needs_jd,
+            needs_gap_analysis=needs_gap,
+            needs_suggestions=needs_sug,
+            needs_rewrite=needs_rew,
+        )
+    except Exception:
+        logger.exception("Pipeline failed for run %s round %s", run_id, round_num)
+        conn = get_connection()
+        conn.execute(
+            "UPDATE ai_runs SET status = 'failed', error = 'Pipeline error' WHERE id = ? AND status = 'running'",
+            (run_id,),
+        )
+        conn.commit()
+        conn.close()
+        return
 
     try:
         llm = get_chat_model()
         summarize_old_rounds(run_id, llm)
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("summarize_old_rounds failed (non-fatal): %s", exc)
 
 
 @router.get("/runs/{run_id}/messages")
@@ -255,44 +341,35 @@ async def retry_run(run_id: int):
 
     asyncio.get_event_loop().run_in_executor(
         None,
-        run_pipeline,
-        run_id, run["job_id"], run["resume_id"],
-        job["description"], resume["extracted_text"],
+        lambda: run_pipeline(
+            run_id=run_id,
+            job_id=run["job_id"],
+            resume_id=run["resume_id"],
+            jd_text=job["description"],
+            resume_text=resume["extracted_text"],
+            round_number=0,
+        ),
     )
 
     return {"status": "pending"}
 
 
-class TokenExchangeRequest(BaseModel):
-    provider: str
-    code: str
-    state: str | None = None
-
-
-@router.post("/auth/exchange")
-async def exchange_token(req: TokenExchangeRequest):
-    auth_path = os.environ.get(
-        "AUTH_PROFILES_PATH",
-        str(Path(__file__).parent.parent.parent.parent / "data" / "auth-profiles.json"),
-    )
-
-    os.makedirs(os.path.dirname(auth_path), exist_ok=True)
-
-    store = {"profiles": {}}
-    if os.path.exists(auth_path):
-        with open(auth_path) as f:
-            store = json.load(f)
-
-    profile_id = f"{req.provider}:default"
-    store["profiles"][profile_id] = {
-        "type": "oauth",
-        "provider": req.provider,
-        "access": req.code,
-        "refresh": None,
-        "expires": None,
-    }
-
-    with open(auth_path, "w") as f:
-        json.dump(store, f, indent=2)
-
-    return {"status": "connected", "provider": req.provider}
+@router.delete("/runs/{run_id}", status_code=204)
+async def delete_run(run_id: int):
+    conn = get_connection()
+    try:
+        run = conn.execute(
+            "SELECT status FROM ai_runs WHERE id = ?", (run_id,)
+        ).fetchone()
+        if run is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        if run["status"] == "running":
+            raise HTTPException(status_code=409, detail="run_in_progress")
+        conn.execute("BEGIN")
+        conn.execute("DELETE FROM ai_messages WHERE run_id = ?", (run_id,))
+        conn.execute("DELETE FROM ai_steps WHERE run_id = ?", (run_id,))
+        conn.execute("DELETE FROM ai_runs WHERE id = ?", (run_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return None

@@ -1,13 +1,35 @@
 import os
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load backend/.env before any other import reads os.environ.
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.db import get_connection
+from src.api.exception_handlers import register_exception_handlers
 
 logger = logging.getLogger("jobtracker")
+
+
+def _ensure_round_number_column(db_path: str) -> None:
+    """Add round_number column to ai_steps if missing. Idempotent."""
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(ai_steps)").fetchall()}
+        if "round_number" not in cols:
+            conn.execute(
+                "ALTER TABLE ai_steps ADD COLUMN round_number INTEGER NOT NULL DEFAULT 0"
+            )
+            conn.commit()
+    finally:
+        conn.close()
 
 
 @asynccontextmanager
@@ -30,10 +52,32 @@ async def lifespan(app: FastAPI):
         logger.warning("Stale-run recovery skipped: %s", exc)
     finally:
         conn.close()
+
+    try:
+        from src.memory.embedding_state import ensure_row
+        from src.memory.legacy_migration import migrate_legacy_collection
+        ensure_row()
+        migrate_legacy_collection()
+    except Exception as exc:
+        logger.warning("Legacy embedding migration skipped: %s", exc)
+
+    try:
+        from src.memory.rag import reconcile_resume_index_state
+        reconcile_resume_index_state()
+    except Exception as exc:
+        logger.warning("Resume index reconciliation skipped: %s", exc)
+
+    try:
+        from src.db import get_db_path
+        _ensure_round_number_column(get_db_path())
+    except Exception as exc:
+        logger.warning("round_number migration skipped: %s", exc)
+
     yield
 
 
 app = FastAPI(title="JobTracker AI Backend", lifespan=lifespan)
+register_exception_handlers(app)
 
 app.add_middleware(
     CORSMiddleware,
@@ -43,8 +87,10 @@ app.add_middleware(
 )
 
 from src.api.routes import router
+from src.api.embedding_routes import router as embedding_router
 
 app.include_router(router)
+app.include_router(embedding_router)
 
 
 @app.get("/api/health")

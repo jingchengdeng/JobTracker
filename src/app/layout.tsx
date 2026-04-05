@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ThemeProvider } from "next-themes";
 import { Sidebar } from "@/components/sidebar";
+import { EmbeddingToastBridge } from "@/components/embedding-toast-bridge";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -36,6 +37,7 @@ export default function RootLayout({
             <Sidebar />
             <main className="flex-1 overflow-y-auto p-6">{children}</main>
           </div>
+          <EmbeddingToastBridge />
         </ThemeProvider>
       </body>
     </html>

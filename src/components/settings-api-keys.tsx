@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Trash2, Plus } from "lucide-react";
+import { Trash2, Plus, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,6 +20,7 @@ interface AuthProfile {
   type: "api_key" | "oauth";
   provider: string;
   maskedKey?: string;
+  email?: string;
   status: "active" | "connected" | "expired";
 }
 
@@ -30,6 +31,9 @@ export function SettingsApiKeys() {
   const [provider, setProvider] = useState("");
   const [apiKey, setApiKey] = useState("");
   const [saving, setSaving] = useState(false);
+  const [oauthOpen, setOauthOpen] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
+  const [oauthError, setOauthError] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -78,6 +82,29 @@ export function SettingsApiKeys() {
     }
   }
 
+  async function handleOAuthLogin() {
+    setOauthLoading(true);
+    setOauthError(null);
+    try {
+      const res = await fetch("/api/auth/oauth-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider: "openai-codex" }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setOauthError(data.error || "Login failed");
+        return;
+      }
+      setOauthOpen(false);
+      load();
+    } catch {
+      setOauthError("Failed to connect. Make sure the dev server is running.");
+    } finally {
+      setOauthLoading(false);
+    }
+  }
+
   const oauthProfiles = profiles.filter((p) => p.type === "oauth");
   const apiKeyProfiles = profiles.filter((p) => p.type === "api_key");
 
@@ -89,14 +116,56 @@ export function SettingsApiKeys() {
     <div className="space-y-8 max-w-xl">
       {/* OAuth section */}
       <div className="space-y-3">
-        <h2 className="text-base font-semibold">Subscription Logins</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold">Subscription Logins</h2>
+          <Dialog open={oauthOpen} onOpenChange={(open) => { setOauthOpen(open); if (!open) setOauthError(null); }}>
+            <DialogTrigger render={<Button size="sm" variant="outline" />}>
+              <Plus />
+              Add Login
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Connect OpenAI Codex</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Sign in with your ChatGPT account to use your subscription for AI features.
+                  A browser window will open for authentication.
+                </p>
+                {oauthError && (
+                  <p className="text-sm text-destructive">{oauthError}</p>
+                )}
+                <div className="flex justify-end gap-2">
+                  <DialogClose render={<Button type="button" variant="outline" />}>
+                    Cancel
+                  </DialogClose>
+                  <Button onClick={handleOAuthLogin} disabled={oauthLoading}>
+                    {oauthLoading ? (
+                      <>
+                        <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                        Waiting for sign-in...
+                      </>
+                    ) : (
+                      "Connect"
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
         {oauthProfiles.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No OAuth accounts connected.</p>
+          <p className="text-sm text-muted-foreground">No subscription accounts connected.</p>
         ) : (
           <ul className="divide-y rounded-lg border">
             {oauthProfiles.map((profile) => (
               <li key={profile.id} className="flex items-center justify-between px-3 py-2.5">
-                <span className="text-sm font-medium capitalize">{profile.provider}</span>
+                <div className="space-y-0.5">
+                  <span className="text-sm font-medium capitalize">{profile.provider}</span>
+                  {profile.email && (
+                    <p className="text-xs text-muted-foreground">{profile.email}</p>
+                  )}
+                </div>
                 <div className="flex items-center gap-2">
                   <Badge variant={profile.status === "expired" ? "destructive" : "secondary"}>
                     {profile.status === "expired" ? "Expired" : "Connected"}
@@ -136,7 +205,7 @@ export function SettingsApiKeys() {
                     id="api-provider"
                     value={provider}
                     onChange={(e) => setProvider(e.target.value)}
-                    placeholder="e.g. openai"
+                    placeholder="e.g. openai, anthropic, kimi"
                     required
                   />
                 </div>

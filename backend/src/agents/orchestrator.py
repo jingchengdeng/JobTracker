@@ -9,7 +9,6 @@ from src.agents.resume_agent import (
     step_suggestions,
     step_rewrite,
 )
-from src.agents.classifier import classify_followup
 from src.db import get_connection
 
 
@@ -31,9 +30,12 @@ class ResumeAgentState(TypedDict):
     needs_gap_analysis: bool
     needs_suggestions: bool
     needs_rewrite: bool
+    round_number: int
 
 
-def _update_step_status(run_id: int, step_type: str, status: str, result: str | None = None):
+def _update_step_status(
+    run_id: int, step_type: str, status: str, result: str | None = None, round_number: int = 0
+):
     """Update or create a step record in the database."""
     conn = get_connection()
 
@@ -44,18 +46,22 @@ def _update_step_status(run_id: int, step_type: str, status: str, result: str | 
 
     if existing and status == "running":
         conn.execute(
-            "INSERT INTO ai_steps (run_id, step_type, status, version) VALUES (?, ?, ?, ?)",
-            (run_id, step_type, status, existing["version"] + 1),
+            "INSERT INTO ai_steps (run_id, step_type, status, version, round_number) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (run_id, step_type, status, existing["version"] + 1, round_number),
         )
     elif existing:
+        # UPDATE targets the latest-version row, which was INSERTed at "running"
+        # with the correct round_number. No need to overwrite it here.
         conn.execute(
             "UPDATE ai_steps SET status = ?, result = ?, completed_at = datetime('now') WHERE id = ?",
             (status, result, existing["id"]),
         )
     else:
         conn.execute(
-            "INSERT INTO ai_steps (run_id, step_type, status, result) VALUES (?, ?, ?, ?)",
-            (run_id, step_type, status, result),
+            "INSERT INTO ai_steps (run_id, step_type, status, result, round_number) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (run_id, step_type, status, result, round_number),
         )
 
     conn.commit()
@@ -66,7 +72,8 @@ def _wrap_step(step_type: str, step_fn):
     """Wrap a pipeline step to track status in the database."""
     def wrapped(state: ResumeAgentState) -> ResumeAgentState:
         run_id = state["run_id"]
-        _update_step_status(run_id, step_type, "running")
+        round_number = state["round_number"]
+        _update_step_status(run_id, step_type, "running", round_number=round_number)
         try:
             new_state = step_fn(state)
             result_key = {
@@ -75,10 +82,13 @@ def _wrap_step(step_type: str, step_fn):
                 "suggestions": "suggestions",
                 "rewrite": "rewrite",
             }.get(step_type, step_type)
-            _update_step_status(run_id, step_type, "completed", new_state.get(result_key))
+            _update_step_status(
+                run_id, step_type, "completed",
+                result=new_state.get(result_key), round_number=round_number,
+            )
             return new_state
         except Exception as e:
-            _update_step_status(run_id, step_type, "failed", str(e))
+            _update_step_status(run_id, step_type, "failed", result=str(e), round_number=round_number)
             raise
     return wrapped
 
@@ -160,38 +170,57 @@ def build_graph() -> StateGraph:
 workflow = build_graph().compile()
 
 
+def _format_pipeline_error(exc: Exception) -> str:
+    """Shorten provider errors so the UI doesn't render raw HTML bodies.
+
+    Some providers (e.g. openai-codex -> chatgpt.com) respond with a Cloudflare
+    challenge page when the caller isn't authenticated the way they expect. The
+    OpenAI SDK includes the response body in the exception string, which then
+    leaks into ai_runs.error and the UI. Detect HTML bodies and replace with
+    a short, actionable message.
+    """
+    msg = str(exc)
+    lowered = msg.lower()
+    if "<html" in lowered or "cloudflare" in lowered or "cf_chl_opt" in lowered:
+        return (
+            "Provider returned a challenge page instead of an API response. "
+            "The configured provider appears to be unreachable from this app. "
+            "Switch the default chat provider in Settings to one with a valid API key."
+        )
+    # Keep errors to a reasonable length in the UI.
+    if len(msg) > 500:
+        return msg[:500] + "..."
+    return msg
+
+
 def run_pipeline(
     run_id: int,
     job_id: int,
     resume_id: int,
     jd_text: str,
     resume_text: str,
-    is_followup: bool = False,
-    followup_message: str = "",
+    round_number: int = 0,
+    previous_state: dict | None = None,
     conversation_summary: str | None = None,
     recent_messages: list[dict] | None = None,
-    previous_state: dict | None = None,
+    needs_jd_analysis: bool = True,
+    needs_gap_analysis: bool = True,
+    needs_suggestions: bool = True,
+    needs_rewrite: bool = True,
 ):
-    """Execute the resume analysis pipeline."""
+    """Execute the resume analysis pipeline.
+
+    Callers pass the four `needs_*` booleans explicitly. For the initial run
+    and for retries, all four default to True. For refine follow-ups, callers
+    must call `classify_followup` themselves and pass the resulting booleans +
+    round_number.
+    """
     conn = get_connection()
     conn.execute(
         "UPDATE ai_runs SET status = 'running' WHERE id = ?", (run_id,)
     )
     conn.commit()
     conn.close()
-
-    needs_jd = True
-    needs_gap = True
-    needs_sug = True
-    needs_rew = True
-
-    if is_followup and followup_message:
-        context = conversation_summary or ""
-        classifier_result = classify_followup(followup_message, context)
-        needs_jd = classifier_result.needs_jd_analysis
-        needs_gap = classifier_result.needs_gap_analysis
-        needs_sug = classifier_result.needs_suggestions
-        needs_rew = classifier_result.needs_rewrite
 
     state = {
         "job_id": job_id,
@@ -207,10 +236,11 @@ def run_pipeline(
         "conversation_summary": conversation_summary,
         "recent_messages": recent_messages or [],
         "user_preferences": [],
-        "needs_jd_analysis": needs_jd,
-        "needs_gap_analysis": needs_gap,
-        "needs_suggestions": needs_sug,
-        "needs_rewrite": needs_rew,
+        "needs_jd_analysis": needs_jd_analysis,
+        "needs_gap_analysis": needs_gap_analysis,
+        "needs_suggestions": needs_suggestions,
+        "needs_rewrite": needs_rewrite,
+        "round_number": round_number,
     }
 
     try:
@@ -230,7 +260,7 @@ def run_pipeline(
         conn = get_connection()
         conn.execute(
             "UPDATE ai_runs SET status = 'failed', error = ? WHERE id = ?",
-            (str(e), run_id),
+            (_format_pipeline_error(e), run_id),
         )
         conn.commit()
         conn.close()
