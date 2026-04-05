@@ -31,6 +31,15 @@ async def lifespan(app: FastAPI):
         logger.warning("Stale-run recovery skipped: %s", exc)
     finally:
         conn.close()
+
+    try:
+        from src.memory.embedding_state import ensure_row
+        from src.memory.legacy_migration import migrate_legacy_collection
+        ensure_row()
+        migrate_legacy_collection()
+    except Exception as exc:
+        logger.warning("Legacy embedding migration skipped: %s", exc)
+
     yield
 
 
