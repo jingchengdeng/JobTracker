@@ -184,3 +184,15 @@ export interface AiMessage {
   roundNumber: number;
   createdAt: string;
 }
+
+export interface RunSummary {
+  id: number;
+  resume_id: number;
+  resume_name: string;
+  resume_version: string | null;
+  status: "pending" | "running" | "completed" | "failed";
+  error: string | null;
+  match_score: number | null;
+  created_at: string;
+  completed_at: string | null;
+}
