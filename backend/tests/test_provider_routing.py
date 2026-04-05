@@ -1,3 +1,4 @@
+import json
 from unittest.mock import patch, MagicMock
 import pytest
 
@@ -49,9 +50,12 @@ class TestCreateChatModel:
         kwargs = mock_chat.call_args.kwargs
         assert kwargs["model"] == "gpt-5.4"
         assert kwargs["api_key"] == token
-        assert kwargs["base_url"] == "https://chatgpt.com/backend-api"
+        assert kwargs["base_url"] == "https://chatgpt.com/backend-api/codex"
         assert kwargs["use_responses_api"] is True
         assert kwargs["streaming"] is True
+        assert kwargs["store"] is False
+        assert kwargs["model_kwargs"]["instructions"]
+        assert "http_client" in kwargs
         headers = kwargs["default_headers"]
         assert headers["chatgpt-account-id"] == "acc_xyz"
         assert headers["originator"] == "jobtracker"
@@ -110,6 +114,83 @@ class TestCreateChatModel:
 
         with pytest.raises(ValueError, match="Unknown provider"):
             _create_chat_model("nonexistent", "some-model")
+
+
+class TestCodexRequestRewrite:
+    """Verify the httpx hook that adapts request bodies for chatgpt.com/backend-api/codex."""
+
+    def _make_request(self, body: dict, path: str = "/codex/responses") -> "httpx.Request":
+        import httpx
+        return httpx.Request(
+            "POST",
+            f"https://chatgpt.com/backend-api{path}",
+            content=json.dumps(body).encode(),
+            headers={"content-type": "application/json"},
+        )
+
+    def _read_body(self, request) -> dict:
+        chunks = b"".join(request.stream)
+        return json.loads(chunks)
+
+    def test_moves_system_message_into_instructions(self):
+        from src.models.provider import _codex_rewrite_request
+
+        req = self._make_request({
+            "model": "gpt-5.4",
+            "instructions": "You are a helpful assistant.",
+            "input": [
+                {"role": "system", "content": "Be terse.", "type": "message"},
+                {"role": "user", "content": "hi", "type": "message"},
+            ],
+        })
+        _codex_rewrite_request(req)
+        body = self._read_body(req)
+        assert body["instructions"] == "You are a helpful assistant.\n\nBe terse."
+        assert body["input"] == [
+            {"role": "user", "content": "hi", "type": "message"},
+        ]
+        assert int(req.headers["content-length"]) == len(json.dumps(body).encode())
+
+    def test_handles_list_content_parts(self):
+        from src.models.provider import _codex_rewrite_request
+
+        req = self._make_request({
+            "instructions": "base",
+            "input": [
+                {
+                    "role": "system",
+                    "content": [{"type": "input_text", "text": "A"}, {"type": "input_text", "text": "B"}],
+                    "type": "message",
+                },
+                {"role": "user", "content": "q", "type": "message"},
+            ],
+        })
+        _codex_rewrite_request(req)
+        body = self._read_body(req)
+        assert body["instructions"] == "base\n\nA\n\nB"
+        assert len(body["input"]) == 1
+
+    def test_noop_when_no_system_messages(self):
+        from src.models.provider import _codex_rewrite_request
+
+        original_body = {
+            "instructions": "keep me",
+            "input": [{"role": "user", "content": "hi", "type": "message"}],
+        }
+        req = self._make_request(original_body)
+        original_bytes = b"".join(req.stream)
+        _codex_rewrite_request(req)
+        assert b"".join(req.stream) == original_bytes
+
+    def test_skips_non_responses_paths(self):
+        from src.models.provider import _codex_rewrite_request
+
+        req = self._make_request({
+            "input": [{"role": "system", "content": "x", "type": "message"}],
+        }, path="/codex/other")
+        original_bytes = b"".join(req.stream)
+        _codex_rewrite_request(req)
+        assert b"".join(req.stream) == original_bytes
 
 
 class TestGetChatModelFallback:

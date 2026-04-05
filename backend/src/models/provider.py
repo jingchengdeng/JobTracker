@@ -1,6 +1,7 @@
 import base64
 import json
 
+import httpx
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
@@ -35,6 +36,50 @@ _APP_ORIGINATOR = "jobtracker"
 _APP_VERSION = "0.1.0"
 
 
+def _codex_rewrite_request(request: httpx.Request) -> None:
+    """Rewrite outgoing request body to match chatgpt.com/backend-api/codex.
+
+    The Codex endpoint rejects system-role messages inside `input` and
+    requires them to live in the top-level `instructions` field instead.
+    LangChain's ChatOpenAI always puts SystemMessage into input, so we
+    rewrite the body on the way out: pull system content out, merge it
+    into instructions, and drop the system messages from input.
+    """
+    if not request.url.path.endswith("/responses"):
+        return
+    try:
+        body = json.loads(request.content)
+    except (ValueError, TypeError):
+        return
+    input_items = body.get("input")
+    if not isinstance(input_items, list):
+        return
+    system_texts: list[str] = []
+    kept: list[dict] = []
+    for item in input_items:
+        if isinstance(item, dict) and item.get("role") == "system":
+            content = item.get("content")
+            if isinstance(content, str):
+                system_texts.append(content)
+            elif isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict):
+                        text = part.get("text")
+                        if isinstance(text, str):
+                            system_texts.append(text)
+        else:
+            kept.append(item)
+    if not system_texts:
+        return
+    existing = body.get("instructions") or ""
+    merged = "\n\n".join([existing, *system_texts]).strip()
+    body["instructions"] = merged
+    body["input"] = kept
+    new_content = json.dumps(body).encode()
+    request.stream = httpx.ByteStream(new_content)
+    request.headers["content-length"] = str(len(new_content))
+
+
 def _create_chat_model(provider_id: str, model: str) -> BaseChatModel:
     provider = get_provider(provider_id)
     profile = load_credential(provider_id)
@@ -64,6 +109,17 @@ def _create_chat_model(provider_id: str, model: str) -> BaseChatModel:
                 "User-Agent": f"{_APP_ORIGINATOR}/{_APP_VERSION}",
                 "OpenAI-Beta": "responses=experimental",
             }
+            # chatgpt.com/backend-api/codex requires store=false and a
+            # non-empty top-level `instructions` field, and rejects
+            # system-role messages inside `input`. We seed a default
+            # instructions string; the httpx hook below moves any system
+            # messages LangChain put into `input` up into `instructions`.
+            kwargs["model_kwargs"] = {"instructions": "You are a helpful assistant."}
+            kwargs["store"] = False
+            kwargs["http_client"] = httpx.Client(
+                event_hooks={"request": [_codex_rewrite_request]},
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            )
         return ChatOpenAI(**kwargs)
 
     if provider["client"] == "anthropic":

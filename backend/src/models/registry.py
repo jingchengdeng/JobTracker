@@ -14,7 +14,7 @@ PROVIDERS: dict[str, dict] = {
     },
     "openai-codex": {
         "label": "OpenAI Codex",
-        "baseUrl": "https://chatgpt.com/backend-api",
+        "baseUrl": "https://chatgpt.com/backend-api/codex",
         "client": "openai",
         "api": "codex-responses",
         "auth": "oauth",
