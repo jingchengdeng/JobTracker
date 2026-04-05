@@ -205,10 +205,38 @@ async def send_message(run_id: int, req: SendMessageRequest):
     round_num = get_current_round(run_id)
     save_message(run_id, "user", req.content, round_num)
 
+    conn = get_connection()
+    conn.execute("UPDATE ai_runs SET status = 'running' WHERE id = ?", (run_id,))
+    conn.commit()
+    conn.close()
+
+    job_id_val = run["job_id"]
+    resume_id_val = run["resume_id"]
+    jd_text_val = job["description"]
+    resume_text_val = resume["extracted_text"]
+    user_content = req.content
+
+    asyncio.get_event_loop().run_in_executor(
+        None,
+        lambda: _classify_and_run_pipeline(
+            run_id, job_id_val, resume_id_val,
+            jd_text_val, resume_text_val,
+            user_content, round_num,
+        ),
+    )
+
+    return {"status": "running", "round": round_num}
+
+
+def _classify_and_run_pipeline(
+    run_id, job_id, resume_id, jd_text, resume_text,
+    user_content, round_num,
+):
+    """Classify the follow-up, save the ack, then run the pipeline."""
     summary = get_conversation_summary(run_id)
 
     try:
-        classifier_result = classify_followup(req.content, summary or "")
+        classifier_result = classify_followup(user_content, summary or "")
     except Exception:
         ack_text = "Working on your refine..."
         needs_jd = needs_gap = needs_sug = needs_rew = True
@@ -235,30 +263,6 @@ async def send_message(run_id: int, req: SendMessageRequest):
         if step["step_type"] not in previous_state:
             previous_state[step["step_type"]] = step["result"]
 
-    job_id_val = run["job_id"]
-    resume_id_val = run["resume_id"]
-    jd_text_val = job["description"]
-    resume_text_val = resume["extracted_text"]
-
-    asyncio.get_event_loop().run_in_executor(
-        None,
-        lambda: _run_followup_pipeline(
-            run_id, job_id_val, resume_id_val,
-            jd_text_val, resume_text_val,
-            summary, recent, previous_state, round_num,
-            needs_jd, needs_gap, needs_sug, needs_rew,
-        ),
-    )
-
-    return {"status": "running", "round": round_num}
-
-
-def _run_followup_pipeline(
-    run_id, job_id, resume_id, jd_text, resume_text,
-    summary, recent, previous_state, round_num,
-    needs_jd, needs_gap, needs_sug, needs_rew,
-):
-    """Run the pipeline for a follow-up message and summarize older rounds."""
     run_pipeline(
         run_id=run_id,
         job_id=job_id,

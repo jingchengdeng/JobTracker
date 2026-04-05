@@ -1,4 +1,5 @@
 import sqlite3
+import time
 from unittest.mock import patch
 
 import pytest
@@ -46,6 +47,15 @@ def test_db(tmp_path, monkeypatch):
     return db_path
 
 
+def _wait_for_background(mock_pipeline, timeout=2.0):
+    """Poll until the background thread has called run_pipeline (or timeout)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if mock_pipeline.called:
+            return
+        time.sleep(0.05)
+
+
 def test_followup_saves_user_and_ack_with_same_round(test_db):
     fake_classifier = ClassifierOutput(
         needs_jd_analysis=False, needs_gap_analysis=False,
@@ -61,22 +71,23 @@ def test_followup_saves_user_and_ack_with_same_round(test_db):
         client = TestClient(app)
         resp = client.post("/api/runs/1/message", json={"content": "add leadership"})
         assert resp.status_code == 200
+        _wait_for_background(mock_pipeline)
 
-    conn = sqlite3.connect(test_db)
-    msgs = conn.execute(
-        "SELECT role, content, round_number FROM ai_messages WHERE run_id = 1 ORDER BY id"
-    ).fetchall()
-    conn.close()
+        conn = sqlite3.connect(test_db)
+        msgs = conn.execute(
+            "SELECT role, content, round_number FROM ai_messages WHERE run_id = 1 ORDER BY id"
+        ).fetchall()
+        conn.close()
 
-    assert msgs[1] == ("user", "add leadership", 1)
-    assert msgs[2] == ("assistant", "Sure, I'll tighten the rewrite.", 1)
+        assert msgs[1] == ("user", "add leadership", 1)
+        assert msgs[2] == ("assistant", "Sure, I'll tighten the rewrite.", 1)
 
-    mock_pipeline.assert_called_once()
-    call_kwargs = mock_pipeline.call_args.kwargs
-    assert call_kwargs["needs_suggestions"] is True
-    assert call_kwargs["needs_rewrite"] is True
-    assert call_kwargs["needs_jd_analysis"] is False
-    assert call_kwargs["needs_gap_analysis"] is False
+        mock_pipeline.assert_called_once()
+        call_kwargs = mock_pipeline.call_args.kwargs
+        assert call_kwargs["needs_suggestions"] is True
+        assert call_kwargs["needs_rewrite"] is True
+        assert call_kwargs["needs_jd_analysis"] is False
+        assert call_kwargs["needs_gap_analysis"] is False
 
 
 def test_followup_falls_back_when_classifier_fails(test_db):
@@ -88,11 +99,12 @@ def test_followup_falls_back_when_classifier_fails(test_db):
         client = TestClient(app)
         resp = client.post("/api/runs/1/message", json={"content": "add leadership"})
         assert resp.status_code == 200
+        _wait_for_background(mock_pipeline)
 
-    conn = sqlite3.connect(test_db)
-    msgs = conn.execute(
-        "SELECT role, content FROM ai_messages WHERE run_id = 1 AND round_number = 1 ORDER BY id"
-    ).fetchall()
-    conn.close()
-    assert msgs[0] == ("user", "add leadership")
-    assert msgs[1] == ("assistant", "Working on your refine...")
+        conn = sqlite3.connect(test_db)
+        msgs = conn.execute(
+            "SELECT role, content FROM ai_messages WHERE run_id = 1 AND round_number = 1 ORDER BY id"
+        ).fetchall()
+        conn.close()
+        assert msgs[0] == ("user", "add leadership")
+        assert msgs[1] == ("assistant", "Working on your refine...")

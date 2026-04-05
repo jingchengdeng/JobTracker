@@ -114,8 +114,22 @@ export function ResumeTailorTab({ job }: ResumeTailorTabProps) {
     if (activeRun.status !== "running" && activeRun.status !== "pending") return;
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/ai/runs/${activeRun.id}`);
-        if (res.ok) setActiveRun(await res.json());
+        const [runRes, msgRes] = await Promise.all([
+          fetch(`/api/ai/runs/${activeRun.id}`),
+          fetch(`/api/ai/runs/${activeRun.id}/messages`),
+        ]);
+        if (runRes.ok) {
+          const runData: RunData = await runRes.json();
+          setActiveRun(runData);
+          const maxR = runData.steps?.length
+            ? Math.max(...runData.steps.map((s) => s.round_number))
+            : -1;
+          lastFetchedMsgRoundRef.current = maxR;
+        }
+        if (msgRes.ok) {
+          const data = await msgRes.json();
+          setMessages(data.messages);
+        }
       } catch (err) { console.error(err); }
     }, POLL_INTERVAL_MS);
     return () => clearTimeout(timer);
@@ -158,14 +172,16 @@ export function ResumeTailorTab({ job }: ResumeTailorTabProps) {
   async function handleSendMessage() {
     if (!chatInput.trim() || !activeRun) return;
     const content = chatInput;
+    const nextRound = maxRoundInSteps + 1;
     setChatInput("");
+    setMessages((prev) => [...prev, { role: "user", content, round_number: nextRound }]);
+    setActiveRun({ ...activeRun, status: "running" });
     try {
       await fetch(`/api/ai/runs/${activeRun.id}/message`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ content }),
       });
-      setActiveRun({ ...activeRun, status: "running" });
     } catch (err) { console.error(err); }
   }
 
