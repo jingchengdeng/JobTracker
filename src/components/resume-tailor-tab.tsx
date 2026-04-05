@@ -209,6 +209,18 @@ export function ResumeTailorTab({ job }: ResumeTailorTabProps) {
   const polling =
     activeRun?.status === "running" || activeRun?.status === "pending";
 
+  // A run can have multiple rows per step_type when the user refines and a step
+  // is re-run. Keep only the most recent row for each type (highest id wins).
+  const latestSteps = (() => {
+    if (!activeRun?.steps) return [] as StepData[];
+    const byType = new Map<string, StepData & { id?: number }>();
+    for (const step of activeRun.steps as Array<StepData & { id?: number }>) {
+      const prev = byType.get(step.step_type);
+      if (!prev || (step.id ?? 0) >= (prev.id ?? 0)) byType.set(step.step_type, step);
+    }
+    return Array.from(byType.values());
+  })();
+
   return (
     <div className="flex gap-4">
       <aside className="w-60 shrink-0 border-r pr-3">
@@ -255,7 +267,7 @@ export function ResumeTailorTab({ job }: ResumeTailorTabProps) {
         {activeRun && (
           <div className="flex gap-2">
             {["jd_analysis", "gap_analysis", "suggestions", "rewrite"].map((stepType) => {
-              const step = activeRun.steps?.find((s) => s.step_type === stepType);
+              const step = latestSteps.find((s) => s.step_type === stepType);
               const status = step?.status || "pending";
               return (
                 <div key={stepType} className="flex items-center gap-1.5">
@@ -270,7 +282,7 @@ export function ResumeTailorTab({ job }: ResumeTailorTabProps) {
           </div>
         )}
 
-        {activeRun?.steps?.map((step) => {
+        {latestSteps.map((step) => {
           if (step.status !== "completed" || !step.result) return null;
           const data = parseResult(step.result);
           if (!data) return null;
