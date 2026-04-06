@@ -87,6 +87,7 @@ export function MockInterviewTab({ job }: MockInterviewTabProps) {
         sessions={session.sessions}
         selectedId={null}
         onSelect={session.viewSession}
+        onDelete={session.deleteSession}
       />
       <div className="flex-1">
         {session.screen === "setup" && (
