@@ -79,16 +79,11 @@ class TestInterviewPlan:
                     "time_allocation_minutes": 10,
                 }
             ],
-            "total_questions_target": 5,
             "opening_prompt": "Tell me about yourself.",
-            "scoring_dimensions": [
-                {"name": "Technical Depth", "weight": 0.4, "description": "Depth of technical knowledge"},
-            ],
         }
         plan = InterviewPlan(**data)
         assert len(plan.topics) == 1
         assert plan.topics[0].id == "sys-1"
-        assert len(plan.scoring_dimensions) == 1
 
 
 class TestInterviewScore:
@@ -96,12 +91,12 @@ class TestInterviewScore:
         from src.agents.interview_schemas import InterviewScore
 
         data = {
-            "overall_score": 76,
             "dimension_scores": [
-                {"name": "Technical Depth", "score": 82, "feedback": "Strong design skills."},
+                {"name": "Problem Solving", "score": 8, "feedback": "Good approach",
+                 "evidence": "Candidate said: 'I would start by breaking down the problem into subproblems'"},
             ],
-            "strengths": ["Good estimation"],
-            "improvements": ["Discuss failure modes"],
+            "strengths": ["Clear thinking"],
+            "improvements": ["Add error handling discussion"],
             "model_answers": [
                 {
                     "question": "How would you handle cache invalidation?",
@@ -113,5 +108,14 @@ class TestInterviewScore:
             "summary": "Solid performance overall.",
         }
         score = InterviewScore(**data)
-        assert score.overall_score == 76
+        assert score.dimension_scores[0].score == 8
         assert len(score.model_answers) == 1
+
+    def test_dimension_score_rejects_out_of_range(self):
+        from src.agents.interview_schemas import DimensionScore
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            DimensionScore(name="X", score=15, feedback="Too high", evidence="None")
+        with pytest.raises(ValidationError):
+            DimensionScore(name="X", score=-1, feedback="Too low", evidence="None")

@@ -23,7 +23,7 @@ def test_db(tmp_path, monkeypatch):
 
 
 def _mock_plan_response():
-    from src.agents.interview_schemas import InterviewPlan, TopicPlan, ScoringDimension
+    from src.agents.interview_schemas import InterviewPlan, TopicPlan
 
     return InterviewPlan(
         topics=[TopicPlan(
@@ -31,11 +31,7 @@ def _mock_plan_response():
             questions=["Design a URL shortener"],
             rubric=["Scalability"], time_allocation_minutes=10,
         )],
-        total_questions_target=3,
         opening_prompt="Tell me about yourself.",
-        scoring_dimensions=[ScoringDimension(
-            name="Technical Depth", weight=0.5, description="Depth",
-        )],
     )
 
 
@@ -54,8 +50,10 @@ def _mock_score_response():
     from src.agents.interview_schemas import InterviewScore, DimensionScore, ModelAnswer
 
     return InterviewScore(
-        overall_score=76,
-        dimension_scores=[DimensionScore(name="Technical Depth", score=80, feedback="Good")],
+        dimension_scores=[DimensionScore(
+            name="Problem Solving", score=8, feedback="Good",
+            evidence="Candidate said: 'I would use a hash-based approach'",
+        )],
         strengths=["Clear communication"],
         improvements=["Discuss failure modes"],
         model_answers=[ModelAnswer(
@@ -83,9 +81,8 @@ class TestRunPlanning:
         )
         run_planning(session_id)
 
-        plan, dims = load_plan(session_id)
-        assert plan["total_questions_target"] == 3
-        assert len(dims) == 1
+        plan = load_plan(session_id)
+        assert len(plan["topics"]) == 1
 
         turns = load_turns(session_id)
         assert len(turns) == 1
@@ -179,7 +176,7 @@ class TestRunScoring:
 
         results = load_results(session_id)
         assert results is not None
-        assert results["overall_score"] == 76
+        assert results["overall_score"] == 8  # sum of dimension scores
 
         session = load_session(session_id)
         assert session["status"] == "completed"

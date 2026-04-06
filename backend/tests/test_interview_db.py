@@ -104,13 +104,11 @@ class TestSavePlan:
             job_id=1, resume_id=1, interview_type="technical",
             difficulty="medium", duration_minutes=30, voice="nova",
         )
-        plan = {"topics": [], "total_questions_target": 5, "opening_prompt": "Hi"}
-        dimensions = [{"name": "Depth", "weight": 0.5, "description": "d"}]
-        save_plan(session_id, plan, dimensions)
+        plan = {"topics": [], "opening_prompt": "Hi"}
+        save_plan(session_id, plan)
 
-        loaded_plan, loaded_dims = load_plan(session_id)
-        assert loaded_plan["total_questions_target"] == 5
-        assert loaded_dims[0]["name"] == "Depth"
+        loaded_plan = load_plan(session_id)
+        assert loaded_plan["opening_prompt"] == "Hi"
 
 
 class TestSaveTurn:
