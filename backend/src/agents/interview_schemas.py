@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 _STRICT = ConfigDict(extra="forbid")
@@ -25,21 +25,11 @@ class TopicPlan(BaseModel):
     time_allocation_minutes: int
 
 
-class ScoringDimension(BaseModel):
-    model_config = _STRICT
-
-    name: str
-    weight: float
-    description: str
-
-
 class InterviewPlan(BaseModel):
     model_config = _STRICT
 
     topics: list[TopicPlan]
-    total_questions_target: int
     opening_prompt: str
-    scoring_dimensions: list[ScoringDimension]
 
 
 class ModelAnswer(BaseModel):
@@ -55,14 +45,14 @@ class DimensionScore(BaseModel):
     model_config = _STRICT
 
     name: str
-    score: int
+    score: int = Field(ge=0, le=10)
     feedback: str
+    evidence: str
 
 
 class InterviewScore(BaseModel):
     model_config = _STRICT
 
-    overall_score: int
     dimension_scores: list[DimensionScore]
     strengths: list[str]
     improvements: list[str]
