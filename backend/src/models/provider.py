@@ -145,3 +145,7 @@ def get_chat_model(role: str = "default") -> BaseChatModel:
 
 def get_classifier_model() -> BaseChatModel:
     return get_chat_model("classifier")
+
+
+def get_interview_model() -> BaseChatModel:
+    return get_chat_model("interview")
