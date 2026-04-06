@@ -202,6 +202,11 @@ async def send_message(run_id: int, req: SendMessageRequest):
 
     conn.close()
 
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+
     round_num = get_current_round(run_id)
     save_message(run_id, "user", req.content, round_num)
 
@@ -338,6 +343,11 @@ async def retry_run(run_id: int):
         "SELECT extracted_text FROM resumes WHERE id = ?", (run["resume_id"],)
     ).fetchone()
     conn.close()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
 
     asyncio.get_event_loop().run_in_executor(
         None,
