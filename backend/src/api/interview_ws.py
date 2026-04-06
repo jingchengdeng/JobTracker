@@ -56,8 +56,9 @@ async def interview_ws_handler(websocket: WebSocket, session_id: int):
         "turn_count": len(turns),
     })
 
-    # Synthesize TTS for the opening question (created during planning, no audio yet)
-    if turns and turns[0]["role"] == "interviewer":
+    # Synthesize TTS for the opening question only on initial connect (no candidate turns yet)
+    has_candidate_turn = any(t["role"] == "candidate" for t in turns)
+    if turns and turns[0]["role"] == "interviewer" and not has_candidate_turn:
         try:
             await websocket.send_json({"type": "audio_start"})
             async for chunk in synthesize_speech(turns[0]["text"], session["voice"]):
