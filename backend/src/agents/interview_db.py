@@ -155,3 +155,13 @@ def list_sessions_for_job(job_id: int) -> list[dict]:
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def delete_session(session_id: int) -> None:
+    conn = get_connection()
+    conn.execute("DELETE FROM interview_results WHERE session_id = ?", (session_id,))
+    conn.execute("DELETE FROM interview_turns WHERE session_id = ?", (session_id,))
+    conn.execute("DELETE FROM interview_plans WHERE session_id = ?", (session_id,))
+    conn.execute("DELETE FROM interview_sessions WHERE id = ?", (session_id,))
+    conn.commit()
+    conn.close()

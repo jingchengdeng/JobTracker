@@ -140,3 +140,39 @@ class TestSessionStatus:
         update_session_status(session_id, "active")
         session = load_session(session_id)
         assert session["status"] == "active"
+
+
+class TestDeleteSession:
+    def test_deletes_all_related_data(self, test_db):
+        import sqlite3
+        from src.agents.interview_db import (
+            create_session, save_plan, save_turn, save_results, delete_session,
+        )
+
+        session_id = create_session(
+            job_id=1, resume_id=1, interview_type="technical",
+            difficulty="medium", duration_minutes=30, voice="nova",
+        )
+        save_plan(session_id, {"topics": [], "opening_prompt": "Hi"})
+        save_turn(session_id, "interviewer", "Tell me about yourself.")
+        save_turn(session_id, "candidate", "I am a developer.")
+        save_results(session_id, {
+            "dimension_scores": [{"name": "X", "score": 7, "feedback": "Good", "evidence": "Said X"}],
+            "strengths": ["Clear"], "improvements": ["More depth"],
+            "model_answers": [], "summary": "Solid.",
+        })
+
+        delete_session(session_id)
+
+        conn = sqlite3.connect(test_db)
+        conn.row_factory = sqlite3.Row
+        assert conn.execute("SELECT COUNT(*) FROM interview_sessions WHERE id = ?", (session_id,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM interview_plans WHERE session_id = ?", (session_id,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM interview_turns WHERE session_id = ?", (session_id,)).fetchone()[0] == 0
+        assert conn.execute("SELECT COUNT(*) FROM interview_results WHERE session_id = ?", (session_id,)).fetchone()[0] == 0
+        conn.close()
+
+    def test_noop_on_nonexistent_session(self, test_db):
+        from src.agents.interview_db import delete_session
+
+        delete_session(99999)  # Should not raise
