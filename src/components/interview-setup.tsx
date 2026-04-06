@@ -83,7 +83,11 @@ export function InterviewSetup({ job, resumes, onStart, loading }: InterviewSetu
           <div className="col-span-2">
             <label className="text-sm text-muted-foreground">Resume</label>
             <Select value={resumeId} onValueChange={(v) => v && setResumeId(v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger>
+                <SelectValue placeholder="Select resume">
+                  {resumes.find((r) => r.id.toString() === resumeId)?.name ?? "Select resume"}
+                </SelectValue>
+              </SelectTrigger>
               <SelectContent>
                 {resumes.map((r) => (
                   <SelectItem key={r.id} value={r.id.toString()}>{r.name}</SelectItem>

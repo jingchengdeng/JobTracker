@@ -18,10 +18,12 @@ export function InterviewControls({
   const [elapsed, setElapsed] = useState(0);
 
   useEffect(() => {
-    if (!startedAt || isPaused) return;
-    const start = new Date(startedAt).getTime();
+    if (isPaused) return;
+    const startTime = startedAt
+      ? new Date(startedAt.endsWith("Z") ? startedAt : startedAt + "Z").getTime()
+      : Date.now();
     const interval = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - start) / 1000));
+      setElapsed(Math.floor((Date.now() - startTime) / 1000));
     }, 1000);
     return () => clearInterval(interval);
   }, [startedAt, isPaused]);
