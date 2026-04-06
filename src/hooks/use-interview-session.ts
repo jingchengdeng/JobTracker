@@ -120,7 +120,8 @@ export function useInterviewSession(job: Job) {
       }
       const data = await res.json();
       setSessionId(data.session_id);
-      setWsUrl(data.ws_url);
+      // Don't set wsUrl yet — wait for planning to complete
+      const pendingWsUrl = data.ws_url;
       setSessionConfig({
         startedAt: null,
         durationMinutes: config.duration_minutes || 30,
@@ -161,6 +162,8 @@ export function useInterviewSession(job: Job) {
                 createdAt: t.created_at,
               })),
             );
+            // NOW connect WebSocket — questions are ready
+            setWsUrl(pendingWsUrl);
           } else if (sessionData.session.status === "interrupted") {
             clearInterval(poll);
             setScreen("setup");
