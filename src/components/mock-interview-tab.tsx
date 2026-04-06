@@ -62,24 +62,22 @@ export function MockInterviewTab({ job }: MockInterviewTabProps) {
       .catch(() => {});
   }, []);
 
-  const parsedResults = session.results
-    ? {
-        overallScore: (session.results as Record<string, unknown>).overall_score as number,
-        dimensionScores: JSON.parse(
-          (session.results as Record<string, unknown>).dimension_scores_json as string,
-        ),
-        strengths: JSON.parse(
-          (session.results as Record<string, unknown>).strengths_json as string,
-        ),
-        improvements: JSON.parse(
-          (session.results as Record<string, unknown>).improvements_json as string,
-        ),
-        modelAnswers: JSON.parse(
-          (session.results as Record<string, unknown>).model_answers_json as string,
-        ),
-        summary: (session.results as Record<string, unknown>).summary as string,
-      }
-    : null;
+  let parsedResults = null;
+  try {
+    if (session.results) {
+      const r = session.results as Record<string, unknown>;
+      parsedResults = {
+        overallScore: r.overall_score as number,
+        dimensionScores: JSON.parse(r.dimension_scores_json as string),
+        strengths: JSON.parse(r.strengths_json as string),
+        improvements: JSON.parse(r.improvements_json as string),
+        modelAnswers: JSON.parse(r.model_answers_json as string),
+        summary: r.summary as string,
+      };
+    }
+  } catch {
+    // parsedResults stays null — shows "Scoring..." fallback UI
+  }
 
   return (
     <div className="flex gap-4">
