@@ -55,26 +55,26 @@ def update_session_status(session_id: int, status: str) -> None:
     conn.close()
 
 
-def save_plan(session_id: int, plan: dict, scoring_dimensions: list[dict]) -> None:
+def save_plan(session_id: int, plan: dict) -> None:
     conn = get_connection()
     conn.execute(
         "INSERT INTO interview_plans (session_id, plan_json, scoring_dimensions_json) VALUES (?, ?, ?)",
-        (session_id, json.dumps(plan), json.dumps(scoring_dimensions)),
+        (session_id, json.dumps(plan), "[]"),
     )
     conn.commit()
     conn.close()
 
 
-def load_plan(session_id: int) -> tuple[dict, list[dict]]:
+def load_plan(session_id: int) -> dict:
     conn = get_connection()
     row = conn.execute(
-        "SELECT plan_json, scoring_dimensions_json FROM interview_plans WHERE session_id = ?",
+        "SELECT plan_json FROM interview_plans WHERE session_id = ?",
         (session_id,),
     ).fetchone()
     conn.close()
     if not row:
         raise ValueError(f"No plan for session {session_id}")
-    return json.loads(row["plan_json"]), json.loads(row["scoring_dimensions_json"])
+    return json.loads(row["plan_json"])
 
 
 def save_turn(
@@ -112,6 +112,7 @@ def load_turns(session_id: int) -> list[dict]:
 
 
 def save_results(session_id: int, results: dict) -> None:
+    overall_score = sum(d["score"] for d in results["dimension_scores"])
     conn = get_connection()
     conn.execute(
         "INSERT INTO interview_results "
@@ -119,7 +120,7 @@ def save_results(session_id: int, results: dict) -> None:
         "improvements_json, model_answers_json, summary) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (
             session_id,
-            results["overall_score"],
+            overall_score,
             json.dumps(results["dimension_scores"]),
             json.dumps(results["strengths"]),
             json.dumps(results["improvements"]),
