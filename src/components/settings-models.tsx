@@ -28,6 +28,7 @@ interface ModelConfig {
   default: RoleConfig;
   classifier: RoleConfig;
   embedding: RoleConfig;
+  interview: RoleConfig;
 }
 
 interface ProviderInfo {
@@ -53,6 +54,11 @@ const ROLE_LABELS: Record<string, { title: string; description: string }> = {
     title: "Embedding Model",
     description:
       "Generates vector embeddings for semantic search across resumes and job postings.",
+  },
+  interview: {
+    title: "Interview Model",
+    description:
+      "Powers the mock interview pipeline — generates questions, evaluates answers, and produces feedback.",
   },
 };
 
@@ -310,7 +316,7 @@ export function SettingsModels() {
 
   return (
     <form onSubmit={handleSave} className="space-y-6 max-w-2xl">
-      {(["default", "classifier", "embedding"] as const).map((role) => (
+      {(["default", "classifier", "embedding", "interview"] as const).map((role) => (
         <RoleCard
           key={role}
           role={role}
