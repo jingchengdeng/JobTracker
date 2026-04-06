@@ -56,6 +56,17 @@ async def interview_ws_handler(websocket: WebSocket, session_id: int):
         "turn_count": len(turns),
     })
 
+    # Synthesize TTS for the opening question (created during planning, no audio yet)
+    if turns and turns[0]["role"] == "interviewer":
+        try:
+            await websocket.send_json({"type": "audio_start"})
+            async for chunk in synthesize_speech(turns[0]["text"], session["voice"]):
+                await websocket.send_bytes(chunk)
+            await websocket.send_json({"type": "audio_end"})
+        except Exception as tts_exc:
+            logger.warning("Opening question TTS failed: %s", tts_exc)
+            await websocket.send_json({"type": "audio_end"})
+
     # Start heartbeat task
     heartbeat_task = asyncio.create_task(_heartbeat_loop(websocket, state))
 
@@ -169,6 +180,9 @@ async def _handle_text_input(websocket: WebSocket, state: ConnectionState, text:
         return
 
     state.is_processing = True
+
+    # Echo the candidate's text back so the frontend can display it immediately
+    await websocket.send_json({"type": "transcript", "text": text.strip()})
 
     try:
         from src.agents.interview_engine import process_interview_turn
