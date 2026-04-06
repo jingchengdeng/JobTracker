@@ -165,6 +165,7 @@ export function useInterviewSession(job: Job) {
   const endInterview = useCallback(async () => {
     if (!sessionId) return;
     sendEnd();
+    setWsUrl(null); // Stop WebSocket before ending — prevents reconnect loop
     await fetch(`/api/ai/interview/${sessionId}/end`, { method: "PATCH" });
     setScreen("results");
 

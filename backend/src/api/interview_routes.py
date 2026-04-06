@@ -67,6 +67,9 @@ async def start_interview(req: StartRequest):
 @router.patch("/{session_id}/end")
 async def end_interview(session_id: int):
     session = load_session(session_id)
+    # Already scoring or completed — no-op, return current status
+    if session["status"] in ("scoring", "completed"):
+        return {"status": session["status"]}
     if session["status"] not in ("planning", "active", "paused"):
         raise HTTPException(status_code=400, detail=f"Cannot end session in '{session['status']}' status")
 
