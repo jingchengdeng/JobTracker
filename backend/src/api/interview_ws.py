@@ -163,6 +163,11 @@ async def _handle_text_input(websocket: WebSocket, state: ConnectionState, text:
         await websocket.send_json({"type": "error", "code": "busy", "message": "Still processing"})
         return
 
+    turns = load_turns(state.session_id)
+    if len(turns) >= MAX_TURNS_PER_SESSION:
+        await websocket.send_json({"type": "error", "code": "turn_limit", "message": "Maximum turns reached"})
+        return
+
     state.is_processing = True
 
     try:
