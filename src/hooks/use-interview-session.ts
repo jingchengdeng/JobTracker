@@ -244,6 +244,18 @@ export function useInterviewSession(job: Job) {
     setScreen(data.results ? "results" : "active");
   }, []);
 
+  const deleteSession = useCallback(async (id: number) => {
+    await fetch(`/api/ai/interview/${id}`, { method: "DELETE" });
+    fetchSessions();
+    if (id === sessionId) {
+      setSessionId(null);
+      setWsUrl(null);
+      setTurns([]);
+      setResults(null);
+      setScreen("setup");
+    }
+  }, [sessionId, fetchSessions]);
+
   return {
     screen,
     turns,
@@ -263,6 +275,7 @@ export function useInterviewSession(job: Job) {
     resumeInterview,
     handleTextSubmit,
     viewSession,
+    deleteSession,
     setScreen,
   };
 }
