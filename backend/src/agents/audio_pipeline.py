@@ -42,7 +42,8 @@ async def synthesize_speech(text: str, voice: str) -> AsyncIterator[bytes]:
         client.audio.speech.create(model=TTS_MODEL, voice=voice, input=text, response_format="mp3"),
         timeout=15.0,
     )
-    async for chunk in response.aiter_bytes(chunk_size=4096):
+    stream = await response.aiter_bytes(chunk_size=4096)
+    async for chunk in stream:
         yield chunk
 
 

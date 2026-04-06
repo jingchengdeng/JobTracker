@@ -131,8 +131,14 @@ export function useInterviewSession(job: Job) {
       setResults(null);
       setLoading(false);
 
-      // Poll for planning completion
+      // Poll for planning completion (stop on active, interrupted, or 2 min timeout)
+      let planElapsed = 0;
       const poll = setInterval(async () => {
+        planElapsed += 1000;
+        if (planElapsed > 120000) {
+          clearInterval(poll);
+          return;
+        }
         const sessionRes = await fetch(`/api/ai/interview/${data.session_id}`);
         if (sessionRes.ok) {
           const sessionData = await sessionRes.json();
@@ -155,6 +161,9 @@ export function useInterviewSession(job: Job) {
                 createdAt: t.created_at,
               })),
             );
+          } else if (sessionData.session.status === "interrupted") {
+            clearInterval(poll);
+            setScreen("setup");
           }
         }
       }, 1000);
@@ -169,8 +178,14 @@ export function useInterviewSession(job: Job) {
     await fetch(`/api/ai/interview/${sessionId}/end`, { method: "PATCH" });
     setScreen("results");
 
-    // Poll for scoring completion
+    // Poll for scoring completion (stop after results arrive, session fails, or 2 min timeout)
+    let elapsed = 0;
     const poll = setInterval(async () => {
+      elapsed += 1500;
+      if (elapsed > 120000) {
+        clearInterval(poll);
+        return;
+      }
       const res = await fetch(`/api/ai/interview/${sessionId}`);
       if (res.ok) {
         const data = await res.json();
@@ -178,6 +193,8 @@ export function useInterviewSession(job: Job) {
           clearInterval(poll);
           setResults(data.results);
           fetchSessions();
+        } else if (data.session.status === "interrupted") {
+          clearInterval(poll);
         }
       }
     }, 1500);
