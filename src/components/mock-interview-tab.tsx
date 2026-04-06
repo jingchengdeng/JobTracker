@@ -6,10 +6,49 @@ import { InterviewSetup } from "@/components/interview-setup";
 import { InterviewActive } from "@/components/interview-active";
 import { InterviewResults } from "@/components/interview-results";
 import { InterviewHistorySidebar } from "@/components/interview-history-sidebar";
+import { Card } from "@/components/ui/card";
 import type { Job, Resume } from "@/lib/types";
 
 interface MockInterviewTabProps {
   job: Job;
+}
+
+function PlanningScreen() {
+  const [step, setStep] = useState(0);
+  useEffect(() => {
+    const t1 = setTimeout(() => setStep(1), 2000);
+    const t2 = setTimeout(() => setStep(2), 8000);
+    return () => { clearTimeout(t1); clearTimeout(t2); };
+  }, []);
+
+  const steps = [
+    "Analyzing job description...",
+    "Generating interview questions...",
+    "Finalizing interview plan...",
+  ];
+
+  return (
+    <Card className="p-6">
+      <h3 className="mb-4 font-medium">Preparing Your Interview</h3>
+      <div className="space-y-3">
+        {steps.map((label, i) => (
+          <div key={i} className="flex items-center gap-2 text-sm">
+            {i < step ? (
+              <span className="text-green-500">&#10003;</span>
+            ) : i === step ? (
+              <span className="animate-pulse text-muted-foreground">&#9679;</span>
+            ) : (
+              <span className="text-muted-foreground/30">&#9679;</span>
+            )}
+            <span className={i <= step ? "text-foreground" : "text-muted-foreground/50"}>
+              {label}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 text-xs text-muted-foreground">This usually takes 15-30 seconds.</p>
+    </Card>
+  );
 }
 
 export function MockInterviewTab({ job }: MockInterviewTabProps) {
@@ -58,13 +97,7 @@ export function MockInterviewTab({ job }: MockInterviewTabProps) {
             loading={session.loading}
           />
         )}
-        {session.screen === "planning" && (
-          <div className="flex items-center justify-center py-20">
-            <p className="text-sm text-muted-foreground animate-pulse">
-              Preparing your interview...
-            </p>
-          </div>
-        )}
+        {session.screen === "planning" && <PlanningScreen />}
         {session.screen === "active" && (
           <InterviewActive
             turns={session.turns}
