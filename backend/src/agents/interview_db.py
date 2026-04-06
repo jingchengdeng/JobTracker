@@ -157,6 +157,20 @@ def list_sessions_for_job(job_id: int) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def try_transition_to_scoring(session_id: int) -> bool:
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "UPDATE interview_sessions SET status = 'scoring' "
+            "WHERE id = ? AND status IN ('planning', 'active', 'paused')",
+            (session_id,),
+        )
+        conn.commit()
+        return cursor.rowcount == 1
+    finally:
+        conn.close()
+
+
 def delete_session(session_id: int) -> None:
     conn = get_connection()
     conn.execute("DELETE FROM interview_results WHERE session_id = ?", (session_id,))

@@ -176,3 +176,47 @@ class TestDeleteSession:
         from src.agents.interview_db import delete_session
 
         delete_session(99999)  # Should not raise
+
+
+class TestTryTransitionToScoring:
+    def test_transitions_active_session(self, test_db):
+        from src.agents.interview_db import create_session, update_session_status, try_transition_to_scoring, load_session
+
+        session_id = create_session(
+            job_id=1, resume_id=1, interview_type="technical",
+            difficulty="medium", duration_minutes=30, voice="nova",
+        )
+        update_session_status(session_id, "active")
+        assert try_transition_to_scoring(session_id) is True
+        assert load_session(session_id)["status"] == "scoring"
+
+    def test_rejects_already_scoring(self, test_db):
+        from src.agents.interview_db import create_session, update_session_status, try_transition_to_scoring
+
+        session_id = create_session(
+            job_id=1, resume_id=1, interview_type="technical",
+            difficulty="medium", duration_minutes=30, voice="nova",
+        )
+        update_session_status(session_id, "active")
+        assert try_transition_to_scoring(session_id) is True
+        assert try_transition_to_scoring(session_id) is False
+
+    def test_rejects_completed_session(self, test_db):
+        from src.agents.interview_db import create_session, update_session_status, try_transition_to_scoring
+
+        session_id = create_session(
+            job_id=1, resume_id=1, interview_type="technical",
+            difficulty="medium", duration_minutes=30, voice="nova",
+        )
+        update_session_status(session_id, "completed")
+        assert try_transition_to_scoring(session_id) is False
+
+    def test_transitions_planning_session(self, test_db):
+        from src.agents.interview_db import create_session, try_transition_to_scoring, load_session
+
+        session_id = create_session(
+            job_id=1, resume_id=1, interview_type="technical",
+            difficulty="medium", duration_minutes=30, voice="nova",
+        )
+        assert try_transition_to_scoring(session_id) is True
+        assert load_session(session_id)["status"] == "scoring"

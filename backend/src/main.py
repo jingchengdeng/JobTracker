@@ -77,7 +77,7 @@ async def lifespan(app: FastAPI):
         conn = get_connection()
         conn.execute(
             "UPDATE interview_sessions SET status = 'interrupted', ended_at = datetime('now') "
-            "WHERE status IN ('planning', 'active', 'paused')"
+            "WHERE status IN ('planning', 'active', 'paused', 'scoring')"
         )
         conn.commit()
         conn.close()

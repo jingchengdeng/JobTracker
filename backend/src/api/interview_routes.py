@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from src.agents.interview_db import (
     create_session, load_session, update_session_status,
     load_turns, load_results, list_sessions_for_job, delete_session,
+    try_transition_to_scoring,
 )
 from src.agents.interview_engine import run_planning, run_scoring
 from src.auth.credentials import load_credential
@@ -67,11 +68,11 @@ async def start_interview(req: StartRequest):
 @router.patch("/{session_id}/end")
 async def end_interview(session_id: int):
     session = load_session(session_id)
-    # Already scoring or completed — no-op, return current status
     if session["status"] in ("scoring", "completed"):
         return {"status": session["status"]}
-    if session["status"] not in ("planning", "active", "paused"):
-        raise HTTPException(status_code=400, detail=f"Cannot end session in '{session['status']}' status")
+
+    if not try_transition_to_scoring(session_id):
+        return {"status": load_session(session_id)["status"]}
 
     def _do_scoring():
         try:
