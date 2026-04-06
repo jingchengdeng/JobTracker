@@ -85,8 +85,8 @@ export function MockInterviewTab({ job }: MockInterviewTabProps) {
         {session.screen === "results" && parsedResults && (
           <InterviewResults
             {...parsedResults}
+            turns={session.turns}
             onNewInterview={() => session.setScreen("setup")}
-            onViewTranscript={() => session.setScreen("active")}
           />
         )}
         {session.screen === "results" && !parsedResults && (
