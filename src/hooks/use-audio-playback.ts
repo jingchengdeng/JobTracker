@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export function useAudioPlayback() {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -13,6 +13,13 @@ export function useAudioPlayback() {
       audioContextRef.current = new AudioContext();
     }
     return audioContextRef.current;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      audioContextRef.current?.close();
+      audioContextRef.current = null;
+    };
   }, []);
 
   const playQueue = useCallback(async () => {
