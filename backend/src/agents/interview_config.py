@@ -1,5 +1,5 @@
-STT_MODEL = "gpt-4o-mini-transcribe"
-TTS_MODEL = "gpt-4o-mini-tts"
+STT_MODEL = "whisper-1"
+TTS_MODEL = "tts-1"
 TTS_DEFAULT_VOICE = "nova"
 TTS_VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
 

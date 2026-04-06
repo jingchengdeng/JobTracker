@@ -144,7 +144,7 @@ DEFAULT_MODEL_CONFIG = {
     "default": {"provider": "openai", "model": "gpt-5.4", "fallback": None},
     "classifier": {"provider": "openai", "model": "gpt-4o-mini", "fallback": None},
     "embedding": {"provider": "openai", "model": "text-embedding-3-small", "fallback": None},
-    "interview": {"provider": "openai", "model": "gpt-5.4-mini", "fallback": None},
+    "interview": {"provider": "openai-codex", "model": "gpt-5.4", "fallback": None},
 }
 
 

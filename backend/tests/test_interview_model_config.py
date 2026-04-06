@@ -7,8 +7,8 @@ class TestInterviewModelConfig:
         from src.auth.credentials import DEFAULT_MODEL_CONFIG
 
         assert "interview" in DEFAULT_MODEL_CONFIG
-        assert DEFAULT_MODEL_CONFIG["interview"]["provider"] == "openai"
-        assert DEFAULT_MODEL_CONFIG["interview"]["model"] == "gpt-5.4-mini"
+        assert DEFAULT_MODEL_CONFIG["interview"]["provider"] == "openai-codex"
+        assert DEFAULT_MODEL_CONFIG["interview"]["model"] == "gpt-5.4"
 
     def test_migrate_old_config_backfills_interview(self):
         from src.auth.credentials import _migrate_model_config
@@ -20,7 +20,7 @@ class TestInterviewModelConfig:
         }
         result = _migrate_model_config(old)
         assert "interview" in result
-        assert result["interview"]["provider"] == "openai"
+        assert result["interview"]["provider"] == "openai-codex"
 
     def test_migrate_new_config_with_interview_passes_through(self):
         from src.auth.credentials import _migrate_model_config

@@ -135,11 +135,15 @@ async def _handle_audio(websocket: WebSocket, state: ConnectionState, audio_byte
             "type": "interviewer_text", "delta": turn_response.interviewer_message, "done": True,
         })
 
-        # Stream TTS audio
-        await websocket.send_json({"type": "audio_start"})
-        async for chunk in synthesize_speech(turn_response.interviewer_message, voice):
-            await websocket.send_bytes(chunk)
-        await websocket.send_json({"type": "audio_end"})
+        # Stream TTS audio (graceful degradation if TTS unavailable)
+        try:
+            await websocket.send_json({"type": "audio_start"})
+            async for chunk in synthesize_speech(turn_response.interviewer_message, voice):
+                await websocket.send_bytes(chunk)
+            await websocket.send_json({"type": "audio_end"})
+        except Exception as tts_exc:
+            logger.warning("TTS failed, text-only fallback: %s", tts_exc)
+            await websocket.send_json({"type": "audio_end"})
 
     except asyncio.TimeoutError:
         await websocket.send_json({"type": "error", "code": "timeout", "message": "Processing timed out"})
@@ -174,10 +178,15 @@ async def _handle_text_input(websocket: WebSocket, state: ConnectionState, text:
             "type": "interviewer_text", "delta": turn_response.interviewer_message, "done": True,
         })
 
-        await websocket.send_json({"type": "audio_start"})
-        async for chunk in synthesize_speech(turn_response.interviewer_message, voice):
-            await websocket.send_bytes(chunk)
-        await websocket.send_json({"type": "audio_end"})
+        # TTS with graceful degradation
+        try:
+            await websocket.send_json({"type": "audio_start"})
+            async for chunk in synthesize_speech(turn_response.interviewer_message, voice):
+                await websocket.send_bytes(chunk)
+            await websocket.send_json({"type": "audio_end"})
+        except Exception as tts_exc:
+            logger.warning("TTS failed, text-only fallback: %s", tts_exc)
+            await websocket.send_json({"type": "audio_end"})
 
     except asyncio.TimeoutError:
         await websocket.send_json({"type": "error", "code": "timeout", "message": "Processing timed out"})

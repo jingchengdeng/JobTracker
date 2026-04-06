@@ -48,7 +48,14 @@ async def start_interview(req: StartRequest):
     )
 
     # Run planning in background thread (same pattern as resume tailor)
-    asyncio.get_event_loop().run_in_executor(None, lambda: run_planning(session_id))
+    def _do_planning():
+        try:
+            run_planning(session_id)
+        except Exception as exc:
+            logger.exception("Planning failed for session %s: %s", session_id, exc)
+            update_session_status(session_id, "interrupted")
+
+    asyncio.get_event_loop().run_in_executor(None, _do_planning)
 
     host = os.environ.get("INTERVIEW_WS_HOST", "localhost")
     port = os.environ.get("INTERVIEW_WS_PORT", "8000")
@@ -63,7 +70,14 @@ async def end_interview(session_id: int):
     if session["status"] not in ("planning", "active", "paused"):
         raise HTTPException(status_code=400, detail=f"Cannot end session in '{session['status']}' status")
 
-    asyncio.get_event_loop().run_in_executor(None, lambda: run_scoring(session_id))
+    def _do_scoring():
+        try:
+            run_scoring(session_id)
+        except Exception as exc:
+            logger.exception("Scoring failed for session %s: %s", session_id, exc)
+            update_session_status(session_id, "interrupted")
+
+    asyncio.get_event_loop().run_in_executor(None, _do_scoring)
     return {"status": "scoring"}
 
 

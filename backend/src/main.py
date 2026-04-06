@@ -32,6 +32,25 @@ def _ensure_round_number_column(db_path: str) -> None:
         conn.close()
 
 
+def _ensure_interview_plans_table(db_path: str) -> None:
+    """Create interview_plans table if missing. Backend-only, not in Drizzle schema."""
+    import sqlite3
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS interview_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id INTEGER NOT NULL UNIQUE,
+                plan_json TEXT NOT NULL,
+                scoring_dimensions_json TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )"""
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Check LangSmith config
@@ -58,7 +77,7 @@ async def lifespan(app: FastAPI):
         conn = get_connection()
         conn.execute(
             "UPDATE interview_sessions SET status = 'interrupted', ended_at = datetime('now') "
-            "WHERE status IN ('active', 'paused')"
+            "WHERE status IN ('planning', 'active', 'paused')"
         )
         conn.commit()
         conn.close()
@@ -82,6 +101,7 @@ async def lifespan(app: FastAPI):
     try:
         from src.db import get_db_path
         _ensure_round_number_column(get_db_path())
+        _ensure_interview_plans_table(get_db_path())
     except Exception as exc:
         logger.warning("round_number migration skipped: %s", exc)
 
@@ -93,8 +113,8 @@ async def lifespan(app: FastAPI):
                 conn = get_connection()
                 conn.execute(
                     "UPDATE interview_sessions SET status = 'interrupted', ended_at = datetime('now') "
-                    "WHERE status IN ('active', 'paused') "
-                    "AND started_at < datetime('now', '-2 hours')"
+                    "WHERE status IN ('planning', 'active', 'paused') "
+                    "AND created_at < datetime('now', '-2 hours')"
                 )
                 conn.commit()
                 conn.close()
