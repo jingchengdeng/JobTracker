@@ -53,6 +53,18 @@ async def lifespan(app: FastAPI):
     finally:
         conn.close()
 
+    # Startup: mark interrupted interview sessions
+    try:
+        conn = get_connection()
+        conn.execute(
+            "UPDATE interview_sessions SET status = 'interrupted', ended_at = datetime('now') "
+            "WHERE status IN ('active', 'paused')"
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        logger.warning("Interview session recovery skipped: %s", exc)
+
     try:
         from src.memory.embedding_state import ensure_row
         from src.memory.legacy_migration import migrate_legacy_collection
@@ -88,9 +100,11 @@ app.add_middleware(
 
 from src.api.routes import router
 from src.api.embedding_routes import router as embedding_router
+from src.api.interview_routes import router as interview_router
 
 app.include_router(router)
 app.include_router(embedding_router)
+app.include_router(interview_router)
 
 
 @app.get("/api/health")
