@@ -85,7 +85,28 @@ async def lifespan(app: FastAPI):
     except Exception as exc:
         logger.warning("round_number migration skipped: %s", exc)
 
+    async def _expire_stale_sessions():
+        import asyncio
+        while True:
+            await asyncio.sleep(300)  # 5 minutes
+            try:
+                conn = get_connection()
+                conn.execute(
+                    "UPDATE interview_sessions SET status = 'interrupted', ended_at = datetime('now') "
+                    "WHERE status IN ('active', 'paused') "
+                    "AND started_at < datetime('now', '-2 hours')"
+                )
+                conn.commit()
+                conn.close()
+            except Exception as exc:
+                logger.warning("Session expiry check failed: %s", exc)
+
+    import asyncio as _asyncio
+    expiry_task = _asyncio.create_task(_expire_stale_sessions())
+
     yield
+
+    expiry_task.cancel()
 
 
 app = FastAPI(title="JobTracker AI Backend", lifespan=lifespan)
@@ -105,6 +126,15 @@ from src.api.interview_routes import router as interview_router
 app.include_router(router)
 app.include_router(embedding_router)
 app.include_router(interview_router)
+
+
+from fastapi import WebSocket
+from src.api.interview_ws import interview_ws_handler
+
+
+@app.websocket("/ws/interview/{session_id}")
+async def interview_websocket(websocket: WebSocket, session_id: int):
+    await interview_ws_handler(websocket, session_id)
 
 
 @app.get("/api/health")
