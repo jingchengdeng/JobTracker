@@ -46,9 +46,7 @@ export async function POST(request: NextRequest) {
     .insert(jobs)
     .values({
       ...body,
-      interviewDates: body.interviewDates
-        ? JSON.stringify(body.interviewDates)
-        : null,
+      interviewDates: body.interviewDates ?? null,
     })
     .returning()
     .get();
