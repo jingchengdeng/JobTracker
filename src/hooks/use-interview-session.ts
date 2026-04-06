@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useInterviewWebSocket } from "@/hooks/use-interview-websocket";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder";
 import { useAudioPlayback } from "@/hooks/use-audio-playback";
@@ -36,6 +36,15 @@ export function useInterviewSession(job: Job) {
   const [results, setResults] = useState<Record<string, unknown> | null>(null);
   const [sessions, setSessions] = useState<InterviewSessionSummary[]>([]);
   const [loading, setLoading] = useState(false);
+  const planPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const scorePollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (planPollRef.current) clearInterval(planPollRef.current);
+      if (scorePollRef.current) clearInterval(scorePollRef.current);
+    };
+  }, []);
 
   // Fetch session history
   const fetchSessions = useCallback(async () => {
@@ -134,10 +143,12 @@ export function useInterviewSession(job: Job) {
 
       // Poll for planning completion (stop on active, interrupted, or 2 min timeout)
       let planElapsed = 0;
+      if (planPollRef.current) clearInterval(planPollRef.current);
       const poll = setInterval(async () => {
         planElapsed += 1000;
         if (planElapsed > 120000) {
           clearInterval(poll);
+          planPollRef.current = null;
           return;
         }
         const sessionRes = await fetch(`/api/ai/interview/${data.session_id}`);
@@ -145,6 +156,7 @@ export function useInterviewSession(job: Job) {
           const sessionData = await sessionRes.json();
           if (sessionData.session.status === "active") {
             clearInterval(poll);
+            planPollRef.current = null;
             setSessionConfig((prev) => ({
               ...prev,
               startedAt: sessionData.session.started_at,
@@ -166,10 +178,12 @@ export function useInterviewSession(job: Job) {
             setWsUrl(pendingWsUrl);
           } else if (sessionData.session.status === "interrupted") {
             clearInterval(poll);
+            planPollRef.current = null;
             setScreen("setup");
           }
         }
       }, 1000);
+      planPollRef.current = poll;
     },
     [job.id],
   );
@@ -183,10 +197,12 @@ export function useInterviewSession(job: Job) {
 
     // Poll for scoring completion (stop after results arrive, session fails, or 2 min timeout)
     let elapsed = 0;
+    if (scorePollRef.current) clearInterval(scorePollRef.current);
     const poll = setInterval(async () => {
       elapsed += 1500;
       if (elapsed > 120000) {
         clearInterval(poll);
+        scorePollRef.current = null;
         return;
       }
       const res = await fetch(`/api/ai/interview/${sessionId}`);
@@ -194,13 +210,16 @@ export function useInterviewSession(job: Job) {
         const data = await res.json();
         if (data.results) {
           clearInterval(poll);
+          scorePollRef.current = null;
           setResults(data.results);
           fetchSessions();
         } else if (data.session.status === "interrupted") {
           clearInterval(poll);
+          scorePollRef.current = null;
         }
       }
     }, 1500);
+    scorePollRef.current = poll;
   }, [sessionId, sendEnd, fetchSessions]);
 
   const pauseInterview = useCallback(async () => {
