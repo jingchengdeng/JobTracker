@@ -38,7 +38,7 @@ export function InterviewSetup({ job, resumes, onStart, loading }: InterviewSetu
       <div className="grid grid-cols-2 gap-3">
         <div>
           <label className="text-sm text-muted-foreground">Type</label>
-          <Select value={type} onValueChange={setType}>
+          <Select value={type} onValueChange={(v) => v && setType(v)}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="behavioral">Behavioral</SelectItem>
@@ -49,7 +49,7 @@ export function InterviewSetup({ job, resumes, onStart, loading }: InterviewSetu
         </div>
         <div>
           <label className="text-sm text-muted-foreground">Difficulty</label>
-          <Select value={difficulty} onValueChange={setDifficulty}>
+          <Select value={difficulty} onValueChange={(v) => v && setDifficulty(v)}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="easy">Easy</SelectItem>
@@ -60,7 +60,7 @@ export function InterviewSetup({ job, resumes, onStart, loading }: InterviewSetu
         </div>
         <div>
           <label className="text-sm text-muted-foreground">Duration</label>
-          <Select value={duration} onValueChange={setDuration}>
+          <Select value={duration} onValueChange={(v) => v && setDuration(v)}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="15">15 minutes</SelectItem>
@@ -82,7 +82,7 @@ export function InterviewSetup({ job, resumes, onStart, loading }: InterviewSetu
         {resumes.length > 0 && (
           <div className="col-span-2">
             <label className="text-sm text-muted-foreground">Resume</label>
-            <Select value={resumeId} onValueChange={setResumeId}>
+            <Select value={resumeId} onValueChange={(v) => v && setResumeId(v)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 {resumes.map((r) => (
