@@ -30,8 +30,14 @@ class ExtractTextRequest(BaseModel):
 
 @router.post("/extract-text")
 async def extract_resume_text(req: ExtractTextRequest):
+    from pathlib import Path
+    data_dir = Path("data").resolve()
+    resolved = Path(req.file_path).resolve()
+    if not str(resolved).startswith(str(data_dir) + "/"):
+        raise HTTPException(status_code=400, detail="Invalid file path")
+
     try:
-        text = extract_text(req.file_path)
+        text = extract_text(str(resolved))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="File not found")
     except ValueError as e:
@@ -202,6 +208,11 @@ async def send_message(run_id: int, req: SendMessageRequest):
 
     conn.close()
 
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
+
     round_num = get_current_round(run_id)
     save_message(run_id, "user", req.content, round_num)
 
@@ -338,6 +349,11 @@ async def retry_run(run_id: int):
         "SELECT extracted_text FROM resumes WHERE id = ?", (run["resume_id"],)
     ).fetchone()
     conn.close()
+
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if not resume:
+        raise HTTPException(status_code=404, detail="Resume not found")
 
     asyncio.get_event_loop().run_in_executor(
         None,

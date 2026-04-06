@@ -27,9 +27,6 @@ export async function PUT(
     .update(jobs)
     .set({
       ...body,
-      interviewDates: body.interviewDates
-        ? JSON.stringify(body.interviewDates)
-        : undefined,
       updatedAt: sql`(datetime('now'))`,
     })
     .where(eq(jobs.id, Number(id)))

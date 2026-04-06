@@ -22,7 +22,7 @@ const PROVIDERS: Record<
   "openai-codex": {
     label: "OpenAI Codex",
     auth: "oauth",
-    chatModels: ["gpt-5.4", "gpt-5.3-codex"],
+    chatModels: ["gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark"],
     embeddingModels: [],
   },
   anthropic: {

@@ -144,12 +144,16 @@ DEFAULT_MODEL_CONFIG = {
     "default": {"provider": "openai", "model": "gpt-5.4", "fallback": None},
     "classifier": {"provider": "openai", "model": "gpt-4o-mini", "fallback": None},
     "embedding": {"provider": "openai", "model": "text-embedding-3-small", "fallback": None},
+    "interview": {"provider": "openai", "model": "gpt-5.4", "fallback": None},
 }
 
 
 def _migrate_model_config(raw: dict) -> dict:
     """Convert old flat format to new role-based format. Pass through if already new."""
     if "default" in raw and isinstance(raw["default"], dict):
+        # Backfill interview role if missing (existing configs from before this feature)
+        if "interview" not in raw:
+            raw["interview"] = DEFAULT_MODEL_CONFIG["interview"]
         return raw
     return {
         "default": {
@@ -167,6 +171,7 @@ def _migrate_model_config(raw: dict) -> dict:
             "model": raw.get("embeddingModel", "text-embedding-3-small"),
             "fallback": None,
         },
+        "interview": DEFAULT_MODEL_CONFIG["interview"],
     }
 
 

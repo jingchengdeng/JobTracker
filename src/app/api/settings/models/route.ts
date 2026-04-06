@@ -14,12 +14,14 @@ interface ModelConfig {
   default: RoleConfig;
   classifier: RoleConfig;
   embedding: RoleConfig;
+  interview: RoleConfig;
 }
 
 const DEFAULT_CONFIG: ModelConfig = {
   default: { provider: "openai", model: "gpt-5.4", fallback: null },
   classifier: { provider: "openai", model: "gpt-4o-mini", fallback: null },
   embedding: { provider: "openai", model: "text-embedding-3-small", fallback: null },
+  interview: { provider: "openai", model: "gpt-5.4-mini", fallback: null },
 };
 
 function migrateConfig(raw: Record<string, unknown>): ModelConfig {
@@ -29,6 +31,7 @@ function migrateConfig(raw: Record<string, unknown>): ModelConfig {
       default: cfg.default ?? DEFAULT_CONFIG.default,
       classifier: cfg.classifier ?? DEFAULT_CONFIG.classifier,
       embedding: cfg.embedding ?? DEFAULT_CONFIG.embedding,
+      interview: cfg.interview ?? DEFAULT_CONFIG.interview,
     };
   }
   return {
@@ -47,6 +50,7 @@ function migrateConfig(raw: Record<string, unknown>): ModelConfig {
       model: (raw.embeddingModel as string) || "text-embedding-3-small",
       fallback: null,
     },
+    interview: DEFAULT_CONFIG.interview,
   };
 }
 
@@ -87,6 +91,11 @@ export async function PUT(request: NextRequest) {
       provider: body.embedding?.provider ?? DEFAULT_CONFIG.embedding.provider,
       model: body.embedding?.model ?? DEFAULT_CONFIG.embedding.model,
       fallback: body.embedding?.fallback ?? null,
+    },
+    interview: {
+      provider: body.interview?.provider ?? DEFAULT_CONFIG.interview.provider,
+      model: body.interview?.model ?? DEFAULT_CONFIG.interview.model,
+      fallback: body.interview?.fallback ?? null,
     },
   };
   writeConfig(config);

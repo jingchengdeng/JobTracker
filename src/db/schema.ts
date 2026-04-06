@@ -11,6 +11,10 @@ import {
   AI_STEP_STATUSES,
   AI_MESSAGE_ROLES,
   RESUME_FILE_TYPES,
+  INTERVIEW_STATUSES,
+  INTERVIEW_TYPES,
+  INTERVIEW_DIFFICULTIES,
+  INTERVIEW_TURN_ROLES,
 } from "@/lib/types";
 
 export const jobs = sqliteTable("jobs", {
@@ -124,6 +128,56 @@ export const aiMessages = sqliteTable("ai_messages", {
   role: text({ enum: AI_MESSAGE_ROLES }).notNull(),
   content: text().notNull(),
   roundNumber: integer("round_number").notNull(),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+export const interviewSessions = sqliteTable("interview_sessions", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  jobId: integer("job_id")
+    .notNull()
+    .references(() => jobs.id),
+  resumeId: integer("resume_id").references(() => resumes.id),
+  status: text({ enum: INTERVIEW_STATUSES }).notNull().default("planning"),
+  interviewType: text("interview_type", { enum: INTERVIEW_TYPES }).notNull(),
+  difficulty: text({ enum: INTERVIEW_DIFFICULTIES }).notNull(),
+  durationMinutes: integer("duration_minutes").notNull(),
+  focusArea: text("focus_area"),
+  voice: text().notNull().default("nova"),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+  startedAt: text("started_at"),
+  endedAt: text("ended_at"),
+});
+
+export const interviewTurns = sqliteTable("interview_turns", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  sessionId: integer("session_id")
+    .notNull()
+    .references(() => interviewSessions.id),
+  turnNumber: integer("turn_number").notNull(),
+  role: text({ enum: INTERVIEW_TURN_ROLES }).notNull(),
+  text: text().notNull(),
+  audioDurationMs: integer("audio_duration_ms"),
+  planTopicRef: text("plan_topic_ref"),
+  createdAt: text("created_at")
+    .notNull()
+    .default(sql`(datetime('now'))`),
+});
+
+export const interviewResults = sqliteTable("interview_results", {
+  id: integer().primaryKey({ autoIncrement: true }),
+  sessionId: integer("session_id")
+    .notNull()
+    .references(() => interviewSessions.id),
+  overallScore: integer("overall_score").notNull(),
+  dimensionScoresJson: text("dimension_scores_json").notNull(),
+  strengthsJson: text("strengths_json").notNull(),
+  improvementsJson: text("improvements_json").notNull(),
+  modelAnswersJson: text("model_answers_json").notNull(),
+  summary: text().notNull(),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),

@@ -24,13 +24,25 @@ Open the AI workspace from any job to get help matching your resume to the posti
 ### Settings
 
 - **API Keys** — configure keys for OpenAI, Anthropic, Kimi, or OpenRouter. OpenAI Codex is supported via OAuth login.
-- **Models** — role-based model config: pick which model handles classification, which runs the agent pipeline, and which generates embeddings. Each role can use a different provider.
+- **Models** — role-based model config: pick which model handles classification, the agent pipeline, embeddings, and the mock interviewer. Each role can use a different provider.
 - **Preferences** — personal context (years of experience, target roles, tone) that guides AI output.
+
+### Mock Interview
+
+Practice for real interviews with an AI interviewer that adapts to the job description and your resume.
+
+- **Interview types** — technical, behavioral, or system design. Choose difficulty, duration (15–60 min), and focus area.
+- **Voice & text** — hold Space to speak (push-to-talk), or type answers as a fallback. The interviewer responds with text and synthesized audio.
+- **Realistic conversation** — the AI asks one question at a time, probes deeper on vague answers, and moves on when you've demonstrated understanding.
+- **Scoring** — five fixed dimensions per interview type, each scored 0–10 with specific evidence cited from the transcript. Overall score out of 50.
+- **Results** — tabbed view with score breakdown, per-dimension feedback with evidence citations, and full transcript.
+- **Session history** — past sessions appear in a sidebar. Click to review, or delete with one click.
+
+Requires an OpenAI key (for speech-to-text and text-to-speech) and an LLM key for the interviewer model.
 
 ### Demo Tabs
 
 - **LinkedIn Search** — mock company overview and suggested connections with templated outreach messages.
-- **Mock Interview** — sample interview setup and feedback scores to preview a future feature.
 
 ## Setup
 
@@ -53,7 +65,7 @@ Your data lives in `jobtracker.db` in the project root and uploaded files go to 
 
 **Frontend:** Next.js 15, TypeScript, Tailwind, shadcn/ui, SQLite (via Drizzle), Recharts.
 
-**Backend:** Python 3.12, FastAPI, LangChain, LangGraph, ChromaDB, PyMuPDF, python-docx.
+**Backend:** Python 3.12, FastAPI, LangChain, LangGraph, ChromaDB, PyMuPDF, python-docx. WebSocket for real-time interview audio streaming.
 
 **LLM Providers:** OpenAI, Anthropic, Kimi, OpenRouter, OpenAI Codex (OAuth).
 

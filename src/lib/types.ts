@@ -41,11 +41,21 @@ export const AI_STEP_STATUSES = ["pending", "running", "completed", "failed"] as
 export const AI_MESSAGE_ROLES = ["user", "assistant"] as const;
 export const RESUME_FILE_TYPES = ["pdf", "docx"] as const;
 
+export const INTERVIEW_STATUSES = ["planning", "active", "paused", "completed", "interrupted"] as const;
+export const INTERVIEW_TYPES = ["behavioral", "technical", "system_design"] as const;
+export const INTERVIEW_DIFFICULTIES = ["easy", "medium", "hard"] as const;
+export const INTERVIEW_TURN_ROLES = ["interviewer", "candidate"] as const;
+
 export type AiRunStatus = (typeof AI_RUN_STATUSES)[number];
 export type AiStepType = (typeof AI_STEP_TYPES)[number];
 export type AiStepStatus = (typeof AI_STEP_STATUSES)[number];
 export type AiMessageRole = (typeof AI_MESSAGE_ROLES)[number];
 export type ResumeFileType = (typeof RESUME_FILE_TYPES)[number];
+
+export type InterviewStatus = (typeof INTERVIEW_STATUSES)[number];
+export type InterviewType = (typeof INTERVIEW_TYPES)[number];
+export type InterviewDifficulty = (typeof INTERVIEW_DIFFICULTIES)[number];
+export type InterviewTurnRole = (typeof INTERVIEW_TURN_ROLES)[number];
 
 export const STATUS_LABELS: Record<JobStatus, string> = {
   saved: "Saved",
@@ -195,4 +205,51 @@ export interface RunSummary {
   match_score: number | null;
   created_at: string;
   completed_at: string | null;
+}
+
+export interface InterviewSession {
+  id: number;
+  jobId: number;
+  resumeId: number | null;
+  status: InterviewStatus;
+  interviewType: InterviewType;
+  difficulty: InterviewDifficulty;
+  durationMinutes: number;
+  focusArea: string | null;
+  voice: string;
+  createdAt: string;
+  startedAt: string | null;
+  endedAt: string | null;
+}
+
+export interface InterviewTurn {
+  id: number;
+  sessionId: number;
+  turnNumber: number;
+  role: InterviewTurnRole;
+  text: string;
+  audioDurationMs: number | null;
+  planTopicRef: string | null;
+  createdAt: string;
+}
+
+export interface InterviewResult {
+  id: number;
+  sessionId: number;
+  overallScore: number;
+  dimensionScoresJson: string;
+  strengthsJson: string;
+  improvementsJson: string;
+  modelAnswersJson: string;
+  summary: string;
+  createdAt: string;
+}
+
+export interface InterviewSessionSummary {
+  id: number;
+  interview_type: string;
+  difficulty: string;
+  status: string;
+  overall_score: number | null;
+  created_at: string;
 }
