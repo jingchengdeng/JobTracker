@@ -166,7 +166,7 @@ def run_scoring(session_id: int) -> None:
     prompt = (
         f"Interview transcript:\n{history}\n\n"
         f"Interview plan:\n{_format_plan(plan)}\n\n"
-        f"Score these exact dimensions (use these exact names):\n{dim_text}\n\n"
+        f"Score EXACTLY these {len(dimensions)} dimensions (one score per dimension, use these exact names):\n{dim_text}\n\n"
         f"Produce per-dimension scores with feedback and evidence, "
         f"a list of strengths, areas for improvement, and model answers for any "
         f"questions where the candidate's answer was weak or incorrect."

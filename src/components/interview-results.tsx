@@ -72,8 +72,8 @@ export function InterviewResults({
               <p className="text-2xl font-bold">{overallScore}/50</p>
               <p className="text-xs text-muted-foreground">Overall Score</p>
             </div>
-            {dimensionScores.map((d) => (
-              <div key={d.name} className="flex-1 rounded border p-3 text-center">
+            {dimensionScores.map((d, i) => (
+              <div key={i} className="flex-1 rounded border p-3 text-center">
                 <p className="text-2xl font-bold">{d.score}/10</p>
                 <p className="text-xs text-muted-foreground">{d.name}</p>
               </div>
@@ -83,8 +83,8 @@ export function InterviewResults({
           <p className="mb-4 text-sm text-muted-foreground">{summary}</p>
 
           <div className="mb-4 space-y-2">
-            {dimensionScores.map((d) => (
-              <div key={d.name} className="rounded border p-3">
+            {dimensionScores.map((d, i) => (
+              <div key={i} className="rounded border p-3">
                 <div className="flex items-center justify-between mb-1">
                   <p className="text-sm font-medium">{d.name}</p>
                   <p className="text-sm font-bold">{d.score}/10</p>
