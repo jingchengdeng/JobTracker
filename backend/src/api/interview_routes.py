@@ -7,7 +7,7 @@ from pydantic import BaseModel
 
 from src.agents.interview_db import (
     create_session, load_session, update_session_status,
-    load_turns, load_results, list_sessions_for_job,
+    load_turns, load_results, list_sessions_for_job, delete_session,
 )
 from src.agents.interview_engine import run_planning, run_scoring
 from src.auth.credentials import load_credential
@@ -113,3 +113,9 @@ async def get_session(session_id: int):
     turns = load_turns(session_id)
     results = load_results(session_id)
     return {"session": session, "turns": turns, "results": results}
+
+
+@router.delete("/{session_id}")
+async def delete_interview(session_id: int):
+    delete_session(session_id)
+    return {"ok": True}

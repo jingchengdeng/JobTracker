@@ -102,3 +102,24 @@ class TestGetSession:
         assert resp.status_code == 200
         data = resp.json()
         assert data["session"]["id"] == session_id
+
+
+class TestDeleteSession:
+    def test_delete_removes_session(self, client, test_db):
+        from src.agents.interview_db import create_session, load_session
+
+        session_id = create_session(
+            job_id=1, resume_id=1, interview_type="technical",
+            difficulty="medium", duration_minutes=30, voice="nova",
+        )
+        resp = client.delete(f"/api/interview/{session_id}")
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+
+        with pytest.raises(ValueError):
+            load_session(session_id)
+
+    def test_delete_nonexistent_returns_ok(self, client, test_db):
+        resp = client.delete("/api/interview/99999")
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
