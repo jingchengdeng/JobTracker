@@ -119,9 +119,9 @@ export function InterviewSetup({ job, resumes, onStart, loading }: InterviewSetu
         onClick={() => onStart({
           interview_type: type,
           difficulty,
-          duration_minutes: parseInt(duration),
+          duration_minutes: parseInt(duration, 10),
           focus_area: focusArea || null,
-          resume_id: resumeId ? parseInt(resumeId) : null,
+          resume_id: resumeId ? parseInt(resumeId, 10) : null,
           voice,
         })}
         disabled={loading}
