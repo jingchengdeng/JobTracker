@@ -18,9 +18,15 @@ def _build_system_prompt(session: dict, preferences: list[str]) -> str:
     parts = [
         f"You are an expert interviewer conducting a {session['interview_type']} interview. "
         f"Difficulty: {session['difficulty']}. Target duration: {session['duration_minutes']} minutes.",
+        "",
+        "Rules:",
+        "- Ask ONE question at a time. Never ask multiple questions in a single turn.",
+        "- Briefly acknowledge the candidate's answer before asking your next question. Be conversational, not robotic.",
+        "- If the candidate's answer is vague or surface-level, probe deeper on the same topic.",
+        "- If the answer demonstrates solid understanding, move to the next topic.",
     ]
     if session.get("focus_area"):
-        parts.append(f"Focus area: {session['focus_area']}.")
+        parts.append(f"\nFocus area: {session['focus_area']}.")
     if preferences:
         parts.append("\nCandidate preferences:")
         for pref in preferences:
@@ -50,8 +56,9 @@ def run_planning(session_id: int) -> None:
         f"Create an interview plan for this candidate.\n\n"
         f"Job Description:\n{jd_text}\n\n"
         f"Candidate Resume:\n{resume_text}\n\n"
-        f"Generate {session['duration_minutes'] // 5} questions across relevant topics. "
-        f"Include a rubric for each topic and derive 3-5 scoring dimensions from the JD."
+        f"Generate topics to cover in {session['duration_minutes']} minutes. "
+        f"For each topic, list suggested angles to explore and a rubric for evaluation. "
+        f"The opening_prompt should be a single conversational question to start the interview."
     )
 
     plan = structured_llm.invoke([
@@ -59,18 +66,14 @@ def run_planning(session_id: int) -> None:
         HumanMessage(content=prompt),
     ])
 
-    save_plan(
-        session_id,
-        plan.model_dump(exclude={"scoring_dimensions"}),
-        [d.model_dump() for d in plan.scoring_dimensions],
-    )
+    save_plan(session_id, plan.model_dump())
     save_turn(session_id, "interviewer", plan.opening_prompt)
     update_session_status(session_id, "active")
 
 
 def process_interview_turn(session_id: int, transcript: str) -> TurnResponse:
     session = load_session(session_id)
-    plan, scoring_dims = load_plan(session_id)
+    plan = load_plan(session_id)
     turns = load_turns(session_id)
     preferences = load_all_preferences()
 
@@ -90,14 +93,12 @@ def process_interview_turn(session_id: int, transcript: str) -> TurnResponse:
     current_topic = uncovered[0] if uncovered else None
 
     prompt = (
-        f"You are conducting an interview. Here is the conversation so far:\n\n"
-        f"{history}\n\n"
+        f"Conversation so far:\n\n{history}\n\n"
         f"Interview plan:\n{_format_plan(plan)}\n\n"
         f"Current topic: {current_topic['area'] if current_topic else 'none remaining'}\n"
         f"Topics remaining: {len(uncovered)}\n\n"
-        f"Evaluate the candidate's last answer and decide what to do next. "
-        f"If the answer was weak, follow up to probe deeper. "
-        f"If the answer was strong and the topic is covered, move to the next topic. "
+        f"The candidate just answered. Briefly acknowledge their answer, "
+        f"then ask ONE follow-up or move to the next topic. "
         f"If all topics are covered or time is up, close the interview."
     )
 
@@ -112,8 +113,8 @@ def process_interview_turn(session_id: int, transcript: str) -> TurnResponse:
         fallback = llm.invoke([
             SystemMessage(content=system),
             HumanMessage(content=(
-                f"{history}\n\nAsk the next interview question. "
-                f"Just respond with the question, nothing else."
+                f"{history}\n\nBriefly acknowledge the candidate's last answer, "
+                f"then ask ONE follow-up question."
             )),
         ])
         turn_response = TurnResponse(
@@ -131,8 +132,11 @@ def process_interview_turn(session_id: int, transcript: str) -> TurnResponse:
 
 def run_scoring(session_id: int) -> None:
     session = load_session(session_id)
-    plan, scoring_dims = load_plan(session_id)
+    plan = load_plan(session_id)
     turns = load_turns(session_id)
+
+    from src.agents.interview_config import SCORING_DIMENSIONS
+    dimensions = SCORING_DIMENSIONS.get(session["interview_type"], SCORING_DIMENSIONS["technical"])
 
     llm = get_interview_model()
     structured_llm = llm.with_structured_output(InterviewScore)
@@ -142,15 +146,28 @@ def run_scoring(session_id: int) -> None:
         for t in turns
     )
 
+    dim_text = "\n".join(
+        f"- {d['name']}: {d['description']}" for d in dimensions
+    )
+
     system = (
         "You are an expert interview evaluator. Score the candidate's performance "
-        "based on the interview transcript, the original plan, and the scoring dimensions."
+        "based on the interview transcript and the scoring dimensions below.\n\n"
+        "Scoring scale for EACH dimension: 0-10\n"
+        "  0 = no evidence\n"
+        "  3 = weak with major gaps\n"
+        "  5 = adequate\n"
+        "  7 = solid with minor gaps\n"
+        "  10 = exceptional with specific evidence\n\n"
+        "For each dimension, you MUST cite a specific quote from the transcript "
+        "in the 'evidence' field that justifies your score. If there is no relevant "
+        "quote, state 'No evidence in transcript' and score 0."
     )
     prompt = (
         f"Interview transcript:\n{history}\n\n"
         f"Interview plan:\n{_format_plan(plan)}\n\n"
-        f"Scoring dimensions:\n{_format_dimensions(scoring_dims)}\n\n"
-        f"Produce an overall score (0-100), per-dimension scores with feedback, "
+        f"Score these exact dimensions (use these exact names):\n{dim_text}\n\n"
+        f"Produce per-dimension scores with feedback and evidence, "
         f"a list of strengths, areas for improvement, and model answers for any "
         f"questions where the candidate's answer was weak or incorrect."
     )
@@ -169,7 +186,3 @@ def _format_plan(plan: dict) -> str:
     for topic in plan.get("topics", []):
         lines.append(f"- {topic['area']}: {', '.join(topic['questions'][:2])}")
     return "\n".join(lines)
-
-
-def _format_dimensions(dims: list[dict]) -> str:
-    return "\n".join(f"- {d['name']} (weight: {d['weight']}): {d['description']}" for d in dims)
