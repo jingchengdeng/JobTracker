@@ -47,6 +47,7 @@ export function InterviewActive({
         micPermission={micPermission}
         onTextSubmit={onTextSubmit}
         isProcessing={isProcessing}
+        isPaused={isPaused}
       />
     </div>
   );

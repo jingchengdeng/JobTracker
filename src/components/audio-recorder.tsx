@@ -5,11 +5,12 @@ interface AudioRecorderProps {
   micPermission: "granted" | "denied" | "prompt";
   onTextSubmit: (text: string) => void;
   isProcessing: boolean;
+  isPaused?: boolean;
 }
 
 import { useState } from "react";
 
-export function AudioRecorder({ isRecording, micPermission, onTextSubmit, isProcessing }: AudioRecorderProps) {
+export function AudioRecorder({ isRecording, micPermission, onTextSubmit, isProcessing, isPaused }: AudioRecorderProps) {
   const [textInput, setTextInput] = useState("");
 
   return (
@@ -26,7 +27,7 @@ export function AudioRecorder({ isRecording, micPermission, onTextSubmit, isProc
               setTextInput("");
             }
           }}
-          disabled={isProcessing}
+          disabled={isProcessing || isPaused}
         />
         <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 text-lg ${
           isRecording

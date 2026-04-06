@@ -111,7 +111,7 @@ export function useInterviewSession(job: Job) {
       setIsProcessing(true);
       sendAudio(blob);
     },
-    screen === "active" && !isProcessing,
+    screen === "active" && !isProcessing && sessionConfig.status !== "paused",
   );
 
   // Actions
