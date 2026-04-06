@@ -75,12 +75,14 @@ async def lifespan(app: FastAPI):
     # Startup: mark interrupted interview sessions
     try:
         conn = get_connection()
-        conn.execute(
-            "UPDATE interview_sessions SET status = 'interrupted', ended_at = datetime('now') "
-            "WHERE status IN ('planning', 'active', 'paused', 'scoring')"
-        )
-        conn.commit()
-        conn.close()
+        try:
+            conn.execute(
+                "UPDATE interview_sessions SET status = 'interrupted', ended_at = datetime('now') "
+                "WHERE status IN ('planning', 'active', 'paused', 'scoring')"
+            )
+            conn.commit()
+        finally:
+            conn.close()
     except Exception as exc:
         logger.warning("Interview session recovery skipped: %s", exc)
 

@@ -37,7 +37,7 @@ async def extract_resume_text(req: ExtractTextRequest):
         raise HTTPException(status_code=400, detail="Invalid file path")
 
     try:
-        text = extract_text(req.file_path)
+        text = extract_text(str(resolved))
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="File not found")
     except ValueError as e:
