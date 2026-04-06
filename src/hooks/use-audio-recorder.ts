@@ -33,20 +33,36 @@ export function useAudioRecorder(
     };
   }, []);
 
-  const startRecording = useCallback(() => {
-    if (!streamRef.current || !enabled) return;
+  const startRecording = useCallback(async () => {
+    if (!enabled) return;
+
+    // Re-acquire stream if tracks are dead
+    if (!streamRef.current || streamRef.current.getTracks().some((t) => t.readyState === "ended")) {
+      try {
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch {
+        setMicPermission("denied");
+        return;
+      }
+    }
+
     chunksRef.current = [];
-    const recorder = new MediaRecorder(streamRef.current, { mimeType: "audio/webm;codecs=opus" });
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunksRef.current.push(e.data);
-    };
-    recorder.onstop = () => {
-      const blob = new Blob(chunksRef.current, { type: "audio/webm" });
-      if (blob.size > 0) onAudioReady(blob);
-    };
-    recorder.start();
-    mediaRecorderRef.current = recorder;
-    setIsRecording(true);
+    try {
+      const recorder = new MediaRecorder(streamRef.current, { mimeType: "audio/webm;codecs=opus" });
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        const blob = new Blob(chunksRef.current, { type: "audio/webm" });
+        if (blob.size > 0) onAudioReady(blob);
+      };
+      recorder.start();
+      mediaRecorderRef.current = recorder;
+      setIsRecording(true);
+    } catch {
+      // Stream went bad between check and use — will retry on next keypress
+    }
   }, [enabled, onAudioReady]);
 
   const stopRecording = useCallback(() => {

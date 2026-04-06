@@ -38,6 +38,8 @@ export function useInterviewWebSocket(
   const onAudioChunkRef = useRef(onAudioChunk);
   onAudioChunkRef.current = onAudioChunk;
 
+  const pingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   const connect = useCallback(() => {
     if (!wsUrl) return;
 
@@ -48,6 +50,12 @@ export function useInterviewWebSocket(
     ws.onopen = () => {
       setStatus("connected");
       retriesRef.current = 0;
+      // Auto-ping to keep connection alive (backend timeout is 45s)
+      pingIntervalRef.current = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "ping" }));
+        }
+      }, 10000);
     };
 
     ws.onmessage = (event) => {
@@ -59,6 +67,7 @@ export function useInterviewWebSocket(
 
       try {
         const msg = JSON.parse(event.data) as WSMessage;
+        if (msg.type === "pong" || msg.type === "ping") return; // Ignore heartbeat
         if (msg.type === "audio_start") {
           receivingAudioRef.current = true;
         } else if (msg.type === "audio_end") {
@@ -72,6 +81,7 @@ export function useInterviewWebSocket(
     };
 
     ws.onclose = () => {
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
       wsRef.current = null;
       if (retriesRef.current < maxRetries) {
         setStatus("reconnecting");
@@ -94,6 +104,7 @@ export function useInterviewWebSocket(
     connect();
     return () => {
       retriesRef.current = maxRetries; // Prevent reconnect on unmount
+      if (pingIntervalRef.current) clearInterval(pingIntervalRef.current);
       wsRef.current?.close();
     };
   }, [connect]);
