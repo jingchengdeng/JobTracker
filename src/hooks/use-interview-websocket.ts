@@ -32,6 +32,12 @@ export function useInterviewWebSocket(
   const maxRetries = 5;
   const receivingAudioRef = useRef(false);
 
+  // Store callbacks in refs so they never trigger reconnects
+  const onMessageRef = useRef(onMessage);
+  onMessageRef.current = onMessage;
+  const onAudioChunkRef = useRef(onAudioChunk);
+  onAudioChunkRef.current = onAudioChunk;
+
   const connect = useCallback(() => {
     if (!wsUrl) return;
 
@@ -47,7 +53,7 @@ export function useInterviewWebSocket(
     ws.onmessage = (event) => {
       if (event.data instanceof ArrayBuffer) {
         setLastAudioChunk(event.data);
-        onAudioChunk?.(event.data);
+        onAudioChunkRef.current?.(event.data);
         return;
       }
 
@@ -59,7 +65,7 @@ export function useInterviewWebSocket(
           receivingAudioRef.current = false;
         }
         setLastMessage(msg);
-        onMessage?.(msg);
+        onMessageRef.current?.(msg);
       } catch {
         // Ignore non-JSON text
       }
@@ -82,7 +88,7 @@ export function useInterviewWebSocket(
     };
 
     wsRef.current = ws;
-  }, [wsUrl, onMessage, onAudioChunk]);
+  }, [wsUrl]);
 
   useEffect(() => {
     connect();
