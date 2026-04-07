@@ -37,7 +37,7 @@ def _build_system_prompt(session: dict, preferences: list[str]) -> str:
 def run_planning(session_id: int) -> None:
     session = load_session(session_id)
     llm = get_interview_model()
-    structured_llm = llm.with_structured_output(InterviewPlan)
+    structured_llm = llm.with_structured_output(InterviewPlan, method="function_calling")
     preferences = load_all_preferences()
 
     from src.db import get_connection
@@ -103,7 +103,7 @@ def process_interview_turn(session_id: int, transcript: str) -> TurnResponse:
     )
 
     try:
-        structured_llm = llm.with_structured_output(TurnResponse)
+        structured_llm = llm.with_structured_output(TurnResponse, method="function_calling")
         turn_response = structured_llm.invoke([
             SystemMessage(content=system),
             HumanMessage(content=prompt),
@@ -139,7 +139,7 @@ def run_scoring(session_id: int) -> None:
     dimensions = SCORING_DIMENSIONS.get(session["interview_type"], SCORING_DIMENSIONS["technical"])
 
     llm = get_interview_model()
-    structured_llm = llm.with_structured_output(InterviewScore)
+    structured_llm = llm.with_structured_output(InterviewScore, method="function_calling")
 
     history = "\n".join(
         f"{'Interviewer' if t['role'] == 'interviewer' else 'Candidate'}: {t['text']}"

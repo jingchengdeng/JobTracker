@@ -28,7 +28,7 @@ def build_system_prompt(preferences: list[str], conversation_summary: str | None
 def step_jd_analysis(state: dict) -> dict:
     """Analyze the job description and extract structured requirements."""
     llm = get_chat_model()
-    structured_llm = llm.with_structured_output(JdAnalysis)
+    structured_llm = llm.with_structured_output(JdAnalysis, method="function_calling")
 
     prompt = (
         f"Analyze this job description and extract the key requirements, "
@@ -78,7 +78,7 @@ def step_rag_retrieval(state: dict) -> dict:
 def step_gap_analysis(state: dict) -> dict:
     """Compare JD requirements against the resume and RAG-retrieved experience."""
     llm = get_chat_model()
-    structured_llm = llm.with_structured_output(GapAnalysis)
+    structured_llm = llm.with_structured_output(GapAnalysis, method="function_calling")
 
     rag_section = ""
     if state.get("rag_chunks"):
@@ -110,7 +110,7 @@ def step_gap_analysis(state: dict) -> dict:
 def step_suggestions(state: dict) -> dict:
     """Generate section-by-section rewrite suggestions."""
     llm = get_chat_model()
-    structured_llm = llm.with_structured_output(Suggestions)
+    structured_llm = llm.with_structured_output(Suggestions, method="function_calling")
 
     recent_messages = state.get("recent_messages", [])
     chat_context = ""
@@ -141,7 +141,7 @@ def step_suggestions(state: dict) -> dict:
 def step_rewrite(state: dict) -> dict:
     """Generate the full rewritten resume."""
     llm = get_chat_model()
-    structured_llm = llm.with_structured_output(RewriteResult)
+    structured_llm = llm.with_structured_output(RewriteResult, method="function_calling")
 
     recent_messages = state.get("recent_messages", [])
     chat_context = ""

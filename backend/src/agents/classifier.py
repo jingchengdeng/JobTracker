@@ -41,7 +41,7 @@ Previous context: {context}
 def classify_followup(message: str, context: str = "") -> ClassifierOutput:
     """Classify a follow-up message to determine which pipeline steps to re-run."""
     llm = get_classifier_model()
-    structured_llm = llm.with_structured_output(ClassifierOutput)
+    structured_llm = llm.with_structured_output(ClassifierOutput, method="function_calling")
 
     result = structured_llm.invoke(
         CLASSIFIER_PROMPT.format(message=message, context=context)
