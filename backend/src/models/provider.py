@@ -149,3 +149,7 @@ def get_classifier_model() -> BaseChatModel:
 
 def get_interview_model() -> BaseChatModel:
     return get_chat_model("interview")
+
+
+def get_linkedin_model() -> BaseChatModel:
+    return get_chat_model("linkedin")

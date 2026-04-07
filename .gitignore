@@ -58,3 +58,6 @@ data/
 # design docs
 docs/superpowers/
 .superpowers/
+
+# worktrees
+.worktrees/

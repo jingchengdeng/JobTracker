@@ -253,3 +253,35 @@ export interface InterviewSessionSummary {
   overall_score: number | null;
   created_at: string;
 }
+
+export interface LinkedinSearch {
+  id: number;
+  status: "running" | "completed" | "failed";
+  started_at: string;
+  completed_at: string | null;
+}
+
+export interface LinkedinContact {
+  id: number;
+  search_id: number;
+  name: string;
+  title: string;
+  location: string | null;
+  linkedin_url: string;
+  source_query: string;
+  relevance_score: number;
+  low_confidence: number;
+  connection_note: string;
+}
+
+export interface LinkedinCompany {
+  domain: string;
+  summary: string;
+  data: Record<string, unknown>;
+}
+
+export interface LinkedinSearchResult {
+  search: LinkedinSearch | null;
+  company: LinkedinCompany | null;
+  contacts: LinkedinContact[];
+}

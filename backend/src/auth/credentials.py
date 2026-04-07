@@ -131,6 +131,8 @@ def _fallback_to_env(provider: str) -> Optional[dict]:
         "anthropic": "ANTHROPIC_API_KEY",
         "openrouter": "OPENROUTER_API_KEY",
         "kimi": "KIMI_API_KEY",
+        "apollo": "APOLLO_API_KEY",
+        "brave": "BRAVE_API_KEY",
     }
     env_var = env_map.get(provider)
     if env_var:
@@ -145,6 +147,7 @@ DEFAULT_MODEL_CONFIG = {
     "classifier": {"provider": "openai", "model": "gpt-4o-mini", "fallback": None},
     "embedding": {"provider": "openai", "model": "text-embedding-3-small", "fallback": None},
     "interview": {"provider": "openai", "model": "gpt-5.4", "fallback": None},
+    "linkedin": {"provider": "openai", "model": "gpt-4o-mini", "fallback": None},
 }
 
 
@@ -154,6 +157,8 @@ def _migrate_model_config(raw: dict) -> dict:
         # Backfill interview role if missing (existing configs from before this feature)
         if "interview" not in raw:
             raw["interview"] = DEFAULT_MODEL_CONFIG["interview"]
+        if "linkedin" not in raw:
+            raw["linkedin"] = DEFAULT_MODEL_CONFIG["linkedin"]
         return raw
     return {
         "default": {
@@ -172,6 +177,7 @@ def _migrate_model_config(raw: dict) -> dict:
             "fallback": None,
         },
         "interview": DEFAULT_MODEL_CONFIG["interview"],
+        "linkedin": DEFAULT_MODEL_CONFIG["linkedin"],
     }
 
 

@@ -29,6 +29,7 @@ interface ModelConfig {
   classifier: RoleConfig;
   embedding: RoleConfig;
   interview: RoleConfig;
+  linkedin: RoleConfig;
 }
 
 interface ProviderInfo {
@@ -59,6 +60,11 @@ const ROLE_LABELS: Record<string, { title: string; description: string }> = {
     title: "Interview Model",
     description:
       "Powers the mock interview pipeline — generates questions, evaluates answers, and produces feedback.",
+  },
+  linkedin: {
+    title: "LinkedIn Search Model",
+    description:
+      "Powers the LinkedIn search pipeline — analyzes job descriptions, scores contact relevance, and generates connection notes.",
   },
 };
 
@@ -316,7 +322,7 @@ export function SettingsModels() {
 
   return (
     <form onSubmit={handleSave} className="space-y-6 max-w-2xl">
-      {(["default", "classifier", "embedding", "interview"] as const).map((role) => (
+      {(["default", "classifier", "embedding", "interview", "linkedin"] as const).map((role) => (
         <RoleCard
           key={role}
           role={role}
