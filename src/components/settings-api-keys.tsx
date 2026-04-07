@@ -205,7 +205,7 @@ export function SettingsApiKeys() {
                     id="api-provider"
                     value={provider}
                     onChange={(e) => setProvider(e.target.value)}
-                    placeholder="e.g. openai, anthropic, kimi"
+                    placeholder="e.g. openai, anthropic, kimi, apollo"
                     required
                   />
                 </div>

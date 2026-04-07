@@ -105,7 +105,7 @@ def truncate_note(note: str) -> str:
 def run_analyze_jd(job: dict) -> dict:
     """Analyze the JD to extract role info. Returns dict matching JdAnalysis fields."""
     llm = get_linkedin_model()
-    structured = llm.with_structured_output(JdAnalysis)
+    structured = llm.with_structured_output(JdAnalysis, method="function_calling")
     description = job.get("description") or ""
     title = job.get("title") or ""
     prompt = (
@@ -148,7 +148,7 @@ def run_score_relevance(people: list[dict], job: dict, analysis: dict | None) ->
     if not people:
         return []
     llm = get_linkedin_model()
-    structured = llm.with_structured_output(RelevanceScores)
+    structured = llm.with_structured_output(RelevanceScores, method="function_calling")
     people_text = "\n".join(
         f"- {p['name']} | {p['title']} | {p['location'] or 'Unknown'} | {p['linkedin_url']}"
         for p in people
@@ -181,7 +181,7 @@ def run_generate_notes(people: list[dict], job: dict) -> list[dict]:
     if not people:
         return []
     llm = get_linkedin_model()
-    structured = llm.with_structured_output(ConnectionNotes)
+    structured = llm.with_structured_output(ConnectionNotes, method="function_calling")
     people_text = "\n".join(
         f"- {p['name']} ({p['title']}) | {p['linkedin_url']}" for p in people
     )
@@ -203,7 +203,7 @@ def run_generate_notes(people: list[dict], job: dict) -> list[dict]:
 def run_compile_summary(company_data: dict, job: dict) -> str:
     """Generate an interview-prep company summary from Apollo data."""
     llm = get_linkedin_model()
-    structured = llm.with_structured_output(CompanySummary)
+    structured = llm.with_structured_output(CompanySummary, method="function_calling")
     # Pick the most relevant fields
     fields = {
         "name": company_data.get("name"),
@@ -234,7 +234,7 @@ def run_review_leadership(people: list[dict], role_domain: str) -> LeadershipRev
     if not people:
         return LeadershipReview(relevant_count=0, total_count=0, needs_retry=False, refined_query=None)
     llm = get_linkedin_model()
-    structured = llm.with_structured_output(LeadershipReview)
+    structured = llm.with_structured_output(LeadershipReview, method="function_calling")
     people_text = "\n".join(f"- {p['name']} | {p['title']}" for p in people)
     prompt = (
         f"Review these search results. The target role domain is '{role_domain}'. "
