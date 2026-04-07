@@ -82,21 +82,21 @@ _DOMAIN_RE = re.compile(r"https?://([^/]+)")
 
 # Domains to skip when searching for a company's website.
 _DOMAIN_EXCLUDED = {
-    "linkedin.com",
-    "google.com",
-    "facebook.com",
-    "twitter.com",
-    "wikipedia.org",
-    "brave.com",
+    "google.com", "linkedin.com", "facebook.com", "twitter.com",
+    "youtube.com", "instagram.com", "wikipedia.org", "brave.com",
+    "glassdoor.com", "indeed.com", "reddit.com", "bing.com",
 }
 
 
 def _extract_root_domain(hostname: str) -> str:
-    """Return root domain from a hostname (strips subdomains like 'www2.')."""
+    """Extract root domain from a full hostname (e.g., 'resources.deloitte.com' -> 'deloitte.com')."""
     parts = hostname.split(".")
-    if len(parts) >= 2:
-        return ".".join(parts[-2:])
-    return hostname
+    if len(parts) <= 2:
+        return hostname
+    # Handle common two-part TLDs like co.uk, com.au
+    if parts[-2] in ("co", "com", "org", "net", "gov", "ac") and len(parts[-1]) <= 3:
+        return ".".join(parts[-3:])
+    return ".".join(parts[-2:])
 
 
 def _is_excluded_domain(root: str) -> bool:
