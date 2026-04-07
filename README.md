@@ -23,8 +23,8 @@ Open the AI workspace from any job to get help matching your resume to the posti
 
 ### Settings
 
-- **API Keys** — configure keys for OpenAI, Anthropic, Kimi, or OpenRouter. OpenAI Codex is supported via OAuth login.
-- **Models** — role-based model config: pick which model handles classification, the agent pipeline, embeddings, and the mock interviewer. Each role can use a different provider.
+- **API Keys** — configure keys for OpenAI, Anthropic, Kimi, OpenRouter, or Apollo. OpenAI Codex is supported via OAuth login. Apollo is optional and enables company enrichment in LinkedIn Search.
+- **Models** — role-based model config: pick which model handles classification, which runs the agent pipeline, which generates embeddings, which powers interviews, and which runs LinkedIn search. Each role can use a different provider.
 - **Preferences** — personal context (years of experience, target roles, tone) that guides AI output.
 
 ### Mock Interview
@@ -40,15 +40,20 @@ Practice for real interviews with an AI interviewer that adapts to the job descr
 
 Requires an OpenAI key (for speech-to-text and text-to-speech) and an LLM key for the interviewer model.
 
-### Demo Tabs
+### LinkedIn Search
 
-- **LinkedIn Search** — mock company overview and suggested connections with templated outreach messages.
+Open the AI workspace from any job and switch to the LinkedIn Search tab.
+
+- **Company Enrichment** — if you add an Apollo API key in Settings, the pipeline fetches company data (size, funding, tech stack, department breakdown) and generates an interview-prep summary.
+- **Contact Discovery** — searches Google for recruiters, talent acquisition, HR, hiring managers, and department peers at the target company. No API key or LinkedIn login needed.
+- **Relevance Scoring** — each contact is scored 0-100 based on how relevant they are to your specific job posting.
+- **Connection Notes** — generates a personalized 300-character LinkedIn connection note per contact with a copy button.
 
 ## Setup
 
 ```bash
 npm install
-cd backend && uv sync && cd ..
+cd backend && uv sync && uv run playwright install chromium && cd ..
 npx drizzle-kit push
 npm run dev
 ```
@@ -65,7 +70,7 @@ Your data lives in `jobtracker.db` in the project root and uploaded files go to 
 
 **Frontend:** Next.js 15, TypeScript, Tailwind, shadcn/ui, SQLite (via Drizzle), Recharts.
 
-**Backend:** Python 3.12, FastAPI, LangChain, LangGraph, ChromaDB, PyMuPDF, python-docx. WebSocket for real-time interview audio streaming.
+**Backend:** Python 3.12, FastAPI, LangChain, LangGraph, ChromaDB, PyMuPDF, python-docx, Playwright. WebSocket for real-time interview audio streaming.
 
 **LLM Providers:** OpenAI, Anthropic, Kimi, OpenRouter, OpenAI Codex (OAuth).
 
