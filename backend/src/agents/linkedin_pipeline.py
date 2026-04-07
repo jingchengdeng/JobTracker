@@ -13,7 +13,7 @@ from src.agents.linkedin_db import (
 from src.agents.linkedin_schemas import (
     JdAnalysis, RelevanceScores, ConnectionNotes, CompanySummary, LeadershipReview,
 )
-from src.agents.linkedin_search import run_google_search, launch_stealth_browser, _new_stealth_page, SEARCH_DELAY_SECONDS
+from src.agents.linkedin_search import brave_search_profiles, brave_search_domain, SEARCH_DELAY_SECONDS
 from src.models.provider import get_linkedin_model
 from src.auth.credentials import load_api_key
 
@@ -38,21 +38,18 @@ def precondition_check(job: dict) -> dict:
 
 
 def build_search_queries(company: str, analysis: dict | None) -> list[dict]:
-    """Build the fixed set of Google search queries."""
+    """Build search queries using site: operator (works on both Brave and Google)."""
     base_queries = [
         {"query": f'site:linkedin.com/in recruiter "{company}"', "tag": "recruiter"},
         {"query": f'site:linkedin.com/in "talent acquisition" "{company}"', "tag": "ta"},
-        {"query": f'site:linkedin.com/in "HR" "{company}"', "tag": "hr"},
+        {"query": f'site:linkedin.com/in "hiring manager" "{company}"', "tag": "hiring_mgr"},
+        {"query": f'site:linkedin.com/in "HR manager" "{company}"', "tag": "hr"},
     ]
     if analysis:
-        leadership_title = analysis["leadership_titles"][0] if analysis["leadership_titles"] else "hiring manager"
+        leadership_title = analysis["leadership_titles"][0] if analysis["leadership_titles"] else "Engineering Manager"
         base_queries.append({
             "query": f'site:linkedin.com/in "{leadership_title}" "{company}"',
             "tag": "leadership",
-        })
-        base_queries.append({
-            "query": f'site:linkedin.com/in "{analysis["role_title"]}" "{company}"',
-            "tag": "peers",
         })
     return base_queries
 
@@ -275,7 +272,7 @@ async def enrich_company_apollo(domain: str) -> dict | None:
 
 async def search_domain_google(browser, company: str) -> str | None:
     """Search Google for a company's domain using Playwright."""
-    from src.agents.linkedin_search import build_search_url
+    from src.agents.linkedin_search import build_search_url, _new_stealth_page
     import re
 
     page = await _new_stealth_page(browser)
@@ -304,7 +301,11 @@ async def search_domain_google(browser, company: str) -> str | None:
 # --- Main pipeline entry point ---
 
 async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
-    """Run the full linkedin search pipeline. Called as a background asyncio task."""
+    """Run the full linkedin search pipeline. Called as a background asyncio task.
+
+    Uses Brave Search API when key is configured (no browser needed).
+    Falls back to headed Google via Xvfb if no Brave key, or headless as last resort.
+    """
     from src.db import get_connection
 
     conn = get_connection()
@@ -320,6 +321,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
         return
 
     job = dict(row)
+    loop = asyncio.get_running_loop()
 
     try:
         # 1. Precondition check
@@ -329,80 +331,105 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
         # 2. Analyze JD (if full mode)
         analysis = None
         if mode == "full":
-            loop = asyncio.get_running_loop()
             analysis = await loop.run_in_executor(None, run_analyze_jd, job)
 
-        # 3. Extract domain
+        # 3. Extract domain from JD text
         domain = None
         if job.get("description"):
-            loop = asyncio.get_running_loop()
             domain = await loop.run_in_executor(None, run_extract_domain, job)
         logger.warning("Domain from JD extraction: %s", domain)
 
-        # 4. Browser domain search (if needed)
+        # 4. Check for Brave API key
+        brave_key = load_api_key("brave")
+
+        # 5. Domain search fallback (if JD extraction found nothing)
+        if not domain and brave_key:
+            domain = await loop.run_in_executor(None, brave_search_domain, job["company"], brave_key)
+            logger.warning("Domain from Brave search: %s", domain)
+
+        # 6. Apollo enrichment (if domain found + key configured)
         company_data = None
-        from playwright.async_api import async_playwright
-        async with async_playwright() as pw:
-            browser = await launch_stealth_browser(pw)
-            try:
-                if not domain:
-                    domain = await search_domain_google(browser, job["company"])
-                    logger.warning("Domain from Google search: %s", domain)
-                    await asyncio.sleep(SEARCH_DELAY_SECONDS)
+        if domain:
+            company_data = await enrich_company_apollo(domain)
+            logger.warning("Apollo enrichment result: %s", "success" if company_data else "no data")
 
-                # 5. Apollo enrichment (if domain found + key configured)
-                company_data = None
-                if domain:
-                    company_data = await enrich_company_apollo(domain)
-                    logger.warning("Apollo enrichment result: %s", "success" if company_data else "no data")
+        # 7. Build and run search queries
+        queries = build_search_queries(job["company"], analysis)
+        search_results: dict[str, list[dict]] = {}
 
-                # 6. Build and run search queries
-                queries = build_search_queries(job["company"], analysis)
-                search_results: dict[str, list[dict]] = {}
+        if brave_key:
+            # Brave API path (no browser needed)
+            for q in queries:
+                results = await loop.run_in_executor(
+                    None, brave_search_profiles, q["query"], brave_key, 15
+                )
+                search_results[q["tag"]] = results
+                logger.warning("Brave search '%s': %d results", q["tag"], len(results))
+                await asyncio.sleep(SEARCH_DELAY_SECONDS)
+        else:
+            # Browser fallback path (Google via Playwright)
+            from playwright.async_api import async_playwright
+            from src.agents.linkedin_search import launch_stealth_browser, run_google_search
 
-                for q in queries:
-                    results = await run_google_search(browser, q["query"])
-                    search_results[q["tag"]] = results
-                    await asyncio.sleep(SEARCH_DELAY_SECONDS)
-
-                # 7. Review leadership results (if applicable)
-                if "leadership" in search_results and analysis:
-                    loop = asyncio.get_running_loop()
-                    review = await loop.run_in_executor(
-                        None, run_review_leadership, search_results["leadership"], analysis["role_domain"]
-                    )
-                    if review.needs_retry and review.refined_query:
-                        retry_query = f'site:linkedin.com/in {review.refined_query} "{job["company"]}"'
-                        retry_results = await run_google_search(browser, retry_query)
-                        search_results["leadership"] = retry_results
+            async with async_playwright() as pw:
+                browser = await launch_stealth_browser(pw)
+                try:
+                    # Domain search via browser if still needed
+                    if not domain:
+                        domain = await search_domain_google(browser, job["company"])
+                        logger.warning("Domain from Google search: %s", domain)
                         await asyncio.sleep(SEARCH_DELAY_SECONDS)
 
-            finally:
-                await browser.close()
+                        # Apollo enrichment with browser-found domain
+                        if domain and not company_data:
+                            company_data = await enrich_company_apollo(domain)
 
-        # 8. Merge and deduplicate
+                    # Profile searches via browser
+                    for q in queries:
+                        results = await run_google_search(browser, q["query"])
+                        search_results[q["tag"]] = results
+                        logger.warning("Google search '%s': %d results", q["tag"], len(results))
+                        await asyncio.sleep(SEARCH_DELAY_SECONDS)
+                finally:
+                    await browser.close()
+
+        # 8. Review leadership results (if applicable)
+        if "leadership" in search_results and analysis and search_results["leadership"]:
+            review = await loop.run_in_executor(
+                None, run_review_leadership, search_results["leadership"], analysis["role_domain"]
+            )
+            if review.needs_retry and review.refined_query:
+                retry_query = f'site:linkedin.com/in "{review.refined_query}" "{job["company"]}"'
+                if brave_key:
+                    retry_results = await loop.run_in_executor(
+                        None, brave_search_profiles, retry_query, brave_key
+                    )
+                else:
+                    retry_results = []
+                search_results["leadership"] = retry_results
+                await asyncio.sleep(SEARCH_DELAY_SECONDS)
+
+        # 9. Merge and deduplicate
         merged = merge_and_deduplicate(search_results)
+        logger.warning("Merged contacts: %d", len(merged))
 
-        # 9. Score relevance
+        # 10. Score relevance
         if merged:
-            loop = asyncio.get_running_loop()
             merged = await loop.run_in_executor(None, run_score_relevance, merged, job, analysis)
 
-        # 10. Filter and rank
+        # 11. Filter and rank
         ranked = filter_and_rank(merged)
 
-        # 11. Generate connection notes
+        # 12. Generate connection notes
         if ranked:
-            loop = asyncio.get_running_loop()
             ranked = await loop.run_in_executor(None, run_generate_notes, ranked, job)
 
-        # 12. Compile company summary
+        # 13. Compile company summary
         summary = None
         if company_data:
-            loop = asyncio.get_running_loop()
             summary = await loop.run_in_executor(None, run_compile_summary, company_data, job)
 
-        # 13. Save results
+        # 14. Save results
         if company_data or domain:
             save_company_data(
                 search_id,

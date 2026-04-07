@@ -35,15 +35,17 @@ class TestBuildSearchQueries:
         }
         queries = build_search_queries("Stripe", analysis)
         assert len(queries) == 5
+        assert all("site:linkedin.com/in" in q["query"] for q in queries)
         assert any("recruiter" in q["query"].lower() for q in queries)
-        assert any("talent acquisition" in q["query"].lower() for q in queries)
-        assert any("Engineering Manager" in q["query"] for q in queries)
+        assert any('"talent acquisition"' in q["query"].lower() for q in queries)
+        assert any('"Engineering Manager"' in q["query"] for q in queries)
 
-    def test_basic_mode_generates_three_queries(self):
+    def test_basic_mode_generates_four_queries(self):
         from src.agents.linkedin_pipeline import build_search_queries
         queries = build_search_queries("Stripe", None)
-        assert len(queries) == 3
-        assert all(q["tag"] in ("recruiter", "ta", "hr") for q in queries)
+        assert len(queries) == 4
+        assert all("site:linkedin.com/in" in q["query"] for q in queries)
+        assert all(q["tag"] in ("recruiter", "ta", "hiring_mgr", "hr") for q in queries)
 
 
 class TestMergeAndDeduplicate:
@@ -128,7 +130,7 @@ class TestTruncateNote:
 
 
 class TestRunLinkedinPipelineIntegration:
-    """Integration test: full pipeline with mocked LLM, Playwright, and Apollo."""
+    """Integration test: full pipeline with mocked LLM, Brave, and Apollo."""
 
     @pytest.fixture
     def db_path(self, tmp_path, monkeypatch):
@@ -146,20 +148,23 @@ class TestRunLinkedinPipelineIntegration:
 
     @patch("src.agents.linkedin_pipeline.get_linkedin_model")
     @patch("src.agents.linkedin_pipeline.enrich_company_apollo", new_callable=AsyncMock)
-    @patch("src.agents.linkedin_pipeline.run_google_search", new_callable=AsyncMock)
-    @patch("src.agents.linkedin_pipeline.search_domain_google", new_callable=AsyncMock)
+    @patch("src.agents.linkedin_pipeline.brave_search_profiles")
+    @patch("src.agents.linkedin_pipeline.brave_search_domain")
+    @patch("src.agents.linkedin_pipeline.load_api_key")
     @pytest.mark.asyncio
     async def test_full_pipeline_completes(
-        self, mock_domain_search, mock_google, mock_apollo, mock_model, db_path
+        self, mock_load_key, mock_domain_search, mock_brave_search, mock_apollo, mock_model, db_path
     ):
         from src.agents.linkedin_db import load_search, load_contacts, create_search
         from src.agents.linkedin_pipeline import run_linkedin_pipeline
+
+        # Mock Brave API key present
+        mock_load_key.return_value = "fake-brave-key"
 
         # Mock LLM
         mock_llm = MagicMock()
         mock_model.return_value = mock_llm
 
-        # analyze_jd returns structured output
         mock_analysis = MagicMock()
         mock_analysis.model_dump.return_value = {
             "role_title": "Senior Software Engineer",
@@ -168,34 +173,28 @@ class TestRunLinkedinPipelineIntegration:
             "leadership_titles": ["Engineering Manager"],
             "department_keywords": ["backend"],
         }
-        # extract_domain returns "stripe.com"
         mock_domain_response = MagicMock()
         mock_domain_response.content = "stripe.com"
 
-        # score_relevance returns scores
         mock_scores = MagicMock()
         mock_scores.scores = [
             MagicMock(linkedin_url="https://www.linkedin.com/in/amy", score=85, reason="Recruiter"),
         ]
 
-        # generate_notes returns notes
         mock_notes = MagicMock()
         mock_notes.notes = [
             MagicMock(linkedin_url="https://www.linkedin.com/in/amy", note="Hi Amy, I am applying for SWE at Stripe."),
         ]
 
-        # compile_summary returns summary
         mock_summary = MagicMock()
         mock_summary.summary = "Stripe is a fintech company."
 
-        # leadership review
         mock_review = MagicMock()
         mock_review.needs_retry = False
         mock_review.relevant_count = 1
         mock_review.total_count = 1
         mock_review.refined_query = None
 
-        # Chain the mock calls
         structured_mock = MagicMock()
         call_count = {"n": 0}
         returns = [mock_analysis, mock_review, mock_scores, mock_notes, mock_summary]
@@ -211,23 +210,15 @@ class TestRunLinkedinPipelineIntegration:
         mock_llm.with_structured_output.return_value = structured_mock
         mock_llm.invoke.return_value = mock_domain_response
 
-        # Mock Apollo
         mock_apollo.return_value = {"name": "Stripe", "estimated_num_employees": 8000}
 
-        # Mock Google search results
-        mock_google.return_value = [
+        mock_brave_search.return_value = [
             {"name": "Amy Salazar", "title": "Recruiter", "location": "Miami", "linkedin_url": "https://www.linkedin.com/in/amy"},
         ]
-        mock_domain_search.return_value = None  # domain extracted from JD
+        mock_domain_search.return_value = None
 
-        # Patch playwright to mock browser
-        with patch("playwright.async_api.async_playwright") as mock_pw:
-            mock_browser = AsyncMock()
-            mock_pw.return_value.__aenter__ = AsyncMock(return_value=MagicMock(chromium=MagicMock(launch=AsyncMock(return_value=mock_browser))))
-            mock_browser.close = AsyncMock()
-
-            search_id = create_search(job_id=1)
-            await run_linkedin_pipeline(search_id, 1)
+        search_id = create_search(job_id=1)
+        await run_linkedin_pipeline(search_id, 1)
 
         search = load_search(search_id)
         assert search["status"] == "completed"
