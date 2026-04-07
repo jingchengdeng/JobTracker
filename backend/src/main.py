@@ -32,6 +32,12 @@ def _ensure_round_number_column(db_path: str) -> None:
         conn.close()
 
 
+def _ensure_linkedin_tables(db_path: str) -> None:
+    """Create linkedin_searches and linkedin_contacts tables if missing. Backend-only."""
+    from src.agents.linkedin_db import ensure_linkedin_tables
+    ensure_linkedin_tables(db_path)
+
+
 def _ensure_interview_plans_table(db_path: str) -> None:
     """Create interview_plans table if missing. Backend-only, not in Drizzle schema."""
     import sqlite3
@@ -87,6 +93,19 @@ async def lifespan(app: FastAPI):
         logger.warning("Interview session recovery skipped: %s", exc)
 
     try:
+        conn = get_connection()
+        try:
+            conn.execute(
+                "UPDATE linkedin_searches SET status = 'failed', completed_at = datetime('now') "
+                "WHERE status IN ('pending', 'running')"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.warning("LinkedIn search recovery skipped: %s", exc)
+
+    try:
         from src.memory.embedding_state import ensure_row
         from src.memory.legacy_migration import migrate_legacy_collection
         ensure_row()
@@ -104,6 +123,7 @@ async def lifespan(app: FastAPI):
         from src.db import get_db_path
         _ensure_round_number_column(get_db_path())
         _ensure_interview_plans_table(get_db_path())
+        _ensure_linkedin_tables(get_db_path())
     except Exception as exc:
         logger.warning("round_number migration skipped: %s", exc)
 
