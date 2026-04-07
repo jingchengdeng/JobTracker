@@ -337,7 +337,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
         domain = None
         if job.get("description"):
             domain = await loop.run_in_executor(None, run_extract_domain, job)
-        logger.warning("Domain from JD extraction: %s", domain)
+        logger.info("Domain from JD extraction: %s", domain)
 
         # 4. Check for Brave API key
         brave_key = load_api_key("brave")
@@ -345,13 +345,13 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
         # 5. Domain search fallback (if JD extraction found nothing)
         if not domain and brave_key:
             domain = await loop.run_in_executor(None, brave_search_domain, job["company"], brave_key)
-            logger.warning("Domain from Brave search: %s", domain)
+            logger.info("Domain from Brave search: %s", domain)
 
         # 6. Apollo enrichment (if domain found + key configured)
         company_data = None
         if domain:
             company_data = await enrich_company_apollo(domain)
-            logger.warning("Apollo enrichment result: %s", "success" if company_data else "no data")
+            logger.info("Apollo enrichment result: %s", "success" if company_data else "no data")
 
         # 7. Build and run search queries
         queries = build_search_queries(job["company"], analysis)
@@ -364,7 +364,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
                     None, brave_search_profiles, q["query"], brave_key, 15
                 )
                 search_results[q["tag"]] = results
-                logger.warning("Brave search '%s': %d results", q["tag"], len(results))
+                logger.info("Brave search '%s': %d results", q["tag"], len(results))
                 await asyncio.sleep(SEARCH_DELAY_SECONDS)
         else:
             # Browser fallback path (Google via Playwright)
@@ -377,7 +377,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
                     # Domain search via browser if still needed
                     if not domain:
                         domain = await search_domain_google(browser, job["company"])
-                        logger.warning("Domain from Google search: %s", domain)
+                        logger.info("Domain from Google search: %s", domain)
                         await asyncio.sleep(SEARCH_DELAY_SECONDS)
 
                         # Apollo enrichment with browser-found domain
@@ -388,7 +388,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
                     for q in queries:
                         results = await run_google_search(browser, q["query"])
                         search_results[q["tag"]] = results
-                        logger.warning("Google search '%s': %d results", q["tag"], len(results))
+                        logger.info("Google search '%s': %d results", q["tag"], len(results))
                         await asyncio.sleep(SEARCH_DELAY_SECONDS)
                 finally:
                     await browser.close()
@@ -409,12 +409,13 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
                 else:
                     logger.warning("Leadership retry skipped — no Brave key, browser already closed")
                     retry_results = []
-                search_results["leadership"] = retry_results
+                if retry_results:
+                    search_results["leadership"] = retry_results
                 await asyncio.sleep(SEARCH_DELAY_SECONDS)
 
         # 9. Merge and deduplicate
         merged = merge_and_deduplicate(search_results)
-        logger.warning("Merged contacts: %d", len(merged))
+        logger.info("Merged contacts: %d", len(merged))
 
         # 10. Score relevance
         if merged:

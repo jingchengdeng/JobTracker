@@ -34,6 +34,7 @@ interface AuthProfile {
 const API_KEY_PROVIDERS = [
   { value: "openai", label: "OpenAI" },
   { value: "anthropic", label: "Anthropic" },
+  { value: "openrouter", label: "OpenRouter" },
   { value: "kimi", label: "Kimi" },
   { value: "apollo", label: "Apollo" },
   { value: "brave", label: "Brave Search" },
