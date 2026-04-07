@@ -158,8 +158,8 @@ class TestRunLinkedinPipelineIntegration:
         from src.agents.linkedin_db import load_search, load_contacts, create_search
         from src.agents.linkedin_pipeline import run_linkedin_pipeline
 
-        # Mock Brave API key present
-        mock_load_key.return_value = "fake-brave-key"
+        # Mock API key lookup — return Brave key, None for others
+        mock_load_key.side_effect = lambda provider: "fake-brave-key" if provider == "brave" else None
 
         # Mock LLM
         mock_llm = MagicMock()

@@ -40,7 +40,7 @@ def precondition_check(job: dict) -> dict:
 def build_search_queries(company: str, analysis: dict | None) -> list[dict]:
     """Build search queries using site: operator (works on both Brave and Google)."""
     base_queries = [
-        {"query": f'site:linkedin.com/in recruiter "{company}"', "tag": "recruiter"},
+        {"query": f'site:linkedin.com/in "recruiter" "{company}"', "tag": "recruiter"},
         {"query": f'site:linkedin.com/in "talent acquisition" "{company}"', "tag": "ta"},
         {"query": f'site:linkedin.com/in "hiring manager" "{company}"', "tag": "hiring_mgr"},
         {"query": f'site:linkedin.com/in "HR manager" "{company}"', "tag": "hr"},
@@ -405,6 +405,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
                         None, brave_search_profiles, retry_query, brave_key
                     )
                 else:
+                    logger.warning("Leadership retry skipped — no Brave key, browser already closed")
                     retry_results = []
                 search_results["leadership"] = retry_results
                 await asyncio.sleep(SEARCH_DELAY_SECONDS)
