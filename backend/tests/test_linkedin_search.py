@@ -1,11 +1,14 @@
 """Tests for linkedin_search pure functions (no browser required)."""
 
 import pytest
+from unittest.mock import patch, MagicMock
 
 from src.agents.linkedin_search import (
     build_search_url,
     is_captcha_page,
     parse_search_results,
+    brave_search_profiles,
+    brave_search_domain,
 )
 
 
@@ -139,3 +142,136 @@ class TestParseSearchResults:
         results = parse_search_results(text)
         assert len(results) == 1
         assert "janedoe-eng" in results[0]["linkedin_url"]
+
+
+class TestBraveSearchProfiles:
+    MOCK_BRAVE_RESPONSE = {
+        "web": {
+            "results": [
+                {
+                    "title": "Amy Salazar - Recruiter at Stripe",
+                    "url": "https://www.linkedin.com/in/amysalazar",
+                    "description": "Miami, Florida, United States · Recruiter at Stripe. Focused on engineering hiring.",
+                },
+                {
+                    "title": "Lindsay Brown - Talent Acquisition @ Stripe",
+                    "url": "https://www.linkedin.com/in/lindsaybrown15",
+                    "description": "Chicago, Illinois, United States · Talent Acquisition at Stripe.",
+                },
+                {
+                    "title": "Stripe Blog - Company News",
+                    "url": "https://stripe.com/blog",
+                    "description": "Latest news from Stripe.",
+                },
+            ]
+        }
+    }
+
+    @patch("src.agents.linkedin_search.httpx")
+    def test_returns_linkedin_profiles_only(self, mock_httpx):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = self.MOCK_BRAVE_RESPONSE
+        mock_httpx.get.return_value = mock_response
+
+        results = brave_search_profiles(
+            "site:linkedin.com/in recruiter Stripe", "fake-key"
+        )
+        assert len(results) == 2
+        assert all("linkedin.com/in/" in r["linkedin_url"] for r in results)
+
+    @patch("src.agents.linkedin_search.httpx")
+    def test_parses_name_and_title(self, mock_httpx):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = self.MOCK_BRAVE_RESPONSE
+        mock_httpx.get.return_value = mock_response
+
+        results = brave_search_profiles(
+            "site:linkedin.com/in recruiter Stripe", "fake-key"
+        )
+        amy = next(r for r in results if "amysalazar" in r["linkedin_url"])
+        assert amy["name"] == "Amy Salazar"
+        assert "Recruiter" in amy["title"]
+
+    @patch("src.agents.linkedin_search.httpx")
+    def test_deduplicates_urls(self, mock_httpx):
+        duped = {
+            "web": {
+                "results": [
+                    {
+                        "title": "Amy Salazar - Recruiter",
+                        "url": "https://www.linkedin.com/in/amysalazar",
+                        "description": "Miami, Florida, United States · Recruiter.",
+                    },
+                    {
+                        "title": "Amy Salazar - Recruiter at Stripe",
+                        "url": "https://www.linkedin.com/in/amysalazar",
+                        "description": "Stripe recruiter.",
+                    },
+                ]
+            }
+        }
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = duped
+        mock_httpx.get.return_value = mock_response
+
+        results = brave_search_profiles("query", "fake-key")
+        assert len(results) == 1
+
+    @patch("src.agents.linkedin_search.httpx")
+    def test_returns_empty_on_api_error(self, mock_httpx):
+        mock_httpx.get.side_effect = Exception("timeout")
+        results = brave_search_profiles("query", "fake-key")
+        assert results == []
+
+    @patch("src.agents.linkedin_search.httpx")
+    def test_returns_empty_on_non_200(self, mock_httpx):
+        mock_response = MagicMock()
+        mock_response.status_code = 429
+        mock_response.text = "Rate limited"
+        mock_httpx.get.return_value = mock_response
+
+        results = brave_search_profiles("query", "fake-key")
+        assert results == []
+
+
+class TestBraveSearchDomain:
+    @patch("src.agents.linkedin_search.httpx")
+    def test_extracts_root_domain(self, mock_httpx):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "web": {
+                "results": [
+                    {"title": "Deloitte US", "url": "https://www2.deloitte.com/us/en.html", "description": "Deloitte official site."},
+                ]
+            }
+        }
+        mock_httpx.get.return_value = mock_response
+
+        domain = brave_search_domain("Deloitte", "fake-key")
+        assert domain == "deloitte.com"
+
+    @patch("src.agents.linkedin_search.httpx")
+    def test_skips_excluded_domains(self, mock_httpx):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "web": {
+                "results": [
+                    {"title": "Deloitte - LinkedIn", "url": "https://www.linkedin.com/company/deloitte", "description": ""},
+                    {"title": "Deloitte US", "url": "https://www2.deloitte.com/us", "description": ""},
+                ]
+            }
+        }
+        mock_httpx.get.return_value = mock_response
+
+        domain = brave_search_domain("Deloitte", "fake-key")
+        assert domain == "deloitte.com"
+
+    @patch("src.agents.linkedin_search.httpx")
+    def test_returns_none_on_error(self, mock_httpx):
+        mock_httpx.get.side_effect = Exception("timeout")
+        assert brave_search_domain("Deloitte", "fake-key") is None

@@ -1,13 +1,15 @@
-"""Playwright-based Google search for LinkedIn profiles."""
+"""LinkedIn profile search via Brave Search API and Playwright/Google fallback."""
 
 import asyncio
 import logging
 import re
 from urllib.parse import quote_plus
 
+import httpx
+
 logger = logging.getLogger(__name__)
 
-SEARCH_DELAY_SECONDS = 3.0
+SEARCH_DELAY_SECONDS = 1.5
 
 # Chromium args to reduce bot detection footprint.
 _BROWSER_ARGS = [
@@ -57,6 +59,131 @@ _NAME_TITLE_RE = re.compile(
 _LOCATION_RE = re.compile(
     r"([A-Z][a-zA-Z\s]+,\s*[A-Z][a-zA-Z\s]+(?:,\s*[A-Z][a-zA-Z\s]+)?)\s*·"
 )
+
+# Extracts hostname from a URL.
+_DOMAIN_RE = re.compile(r"https?://([^/]+)")
+
+# Domains to skip when searching for a company's website.
+_DOMAIN_EXCLUDED = {
+    "linkedin.com",
+    "google.com",
+    "facebook.com",
+    "twitter.com",
+    "wikipedia.org",
+    "search.brave.com",
+}
+
+
+def _extract_root_domain(hostname: str) -> str:
+    """Return root domain from a hostname (strips subdomains like 'www2.')."""
+    parts = hostname.split(".")
+    if len(parts) >= 2:
+        return ".".join(parts[-2:])
+    return hostname
+
+
+def _is_excluded_domain(root: str) -> bool:
+    """Return True if the root domain should be skipped."""
+    return any(root == excl or root.endswith("." + excl) for excl in _DOMAIN_EXCLUDED)
+
+
+# --- Brave Search API (primary, no browser needed) ---
+
+_BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
+
+
+def brave_search_profiles(query: str, api_key: str, max_results: int = 15) -> list[dict]:
+    """Search Brave for LinkedIn profiles. Returns parsed person records.
+
+    Synchronous — call via run_in_executor from async code.
+    """
+    try:
+        resp = httpx.get(
+            _BRAVE_ENDPOINT,
+            params={"q": query, "count": max_results},
+            headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
+            timeout=15.0,
+        )
+        if resp.status_code != 200:
+            logger.warning("Brave API returned %s for '%s'", resp.status_code, query[:80])
+            return []
+        data = resp.json()
+    except Exception as exc:
+        logger.warning("Brave API search failed for '%s': %s", query[:80], exc)
+        return []
+
+    seen: set[str] = set()
+    results: list[dict] = []
+
+    for r in data.get("web", {}).get("results", []):
+        href = r.get("url", "")
+        m = _LINKEDIN_URL_RE.search(href)
+        if not m:
+            continue
+
+        slug = m.group(1)
+        canonical_url = f"https://www.linkedin.com/in/{slug}"
+        if canonical_url in seen:
+            continue
+        seen.add(canonical_url)
+
+        title_text = r.get("title", "")
+        li_idx = title_text.find("LinkedIn")
+        if li_idx > 0:
+            title_text = title_text[:li_idx]
+        title_text = re.sub(r"\s*[|\-\u2013]\s*$", "", title_text).strip()
+
+        name, title = "", ""
+        name_m = _NAME_TITLE_RE.match(title_text)
+        if name_m:
+            name = name_m.group(1).strip()
+            title = name_m.group(2).strip()
+
+        description = r.get("description", "")
+        location = ""
+        loc_m = _LOCATION_RE.search(description)
+        if loc_m:
+            location = loc_m.group(1).strip()
+
+        results.append({
+            "name": name,
+            "title": title,
+            "location": location,
+            "linkedin_url": canonical_url,
+        })
+
+    return results
+
+
+def brave_search_domain(company: str, api_key: str) -> str | None:
+    """Search Brave for a company's website domain.
+
+    Synchronous — call via run_in_executor from async code.
+    Returns root domain (e.g., 'deloitte.com' not 'resources.deloitte.com').
+    """
+    try:
+        resp = httpx.get(
+            _BRAVE_ENDPOINT,
+            params={"q": f'"{company}" official website', "count": 5},
+            headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
+            timeout=15.0,
+        )
+        if resp.status_code != 200:
+            logger.warning("Brave domain search returned %s for '%s'", resp.status_code, company)
+            return None
+        data = resp.json()
+    except Exception as exc:
+        logger.warning("Brave domain search failed for '%s': %s", company, exc)
+        return None
+
+    for r in data.get("web", {}).get("results", []):
+        href = r.get("url", "")
+        m = _DOMAIN_RE.search(href)
+        if m:
+            root = _extract_root_domain(m.group(1).lower())
+            if not _is_excluded_domain(root):
+                return root
+    return None
 
 
 def build_search_url(query: str) -> str:
