@@ -372,7 +372,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
             from src.agents.linkedin_search import launch_stealth_browser, run_google_search
 
             async with async_playwright() as pw:
-                browser = await launch_stealth_browser(pw)
+                browser, display = await launch_stealth_browser(pw, headless=False)
                 try:
                     # Domain search via browser if still needed
                     if not domain:
@@ -392,6 +392,8 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
                         await asyncio.sleep(SEARCH_DELAY_SECONDS)
                 finally:
                     await browser.close()
+                    if display:
+                        display.stop()
 
         # 8. Review leadership results (if applicable)
         if "leadership" in search_results and analysis and search_results["leadership"]:

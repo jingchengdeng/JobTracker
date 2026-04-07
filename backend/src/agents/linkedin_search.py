@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 import re
 from urllib.parse import quote_plus
 
@@ -22,13 +23,29 @@ Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
 """
 
 
-async def launch_stealth_browser(playwright):
-    """Launch a headless Chromium with basic anti-detection settings."""
+async def launch_stealth_browser(playwright, headless: bool = True):
+    """Launch Chromium with basic anti-detection settings.
+
+    When headless=False, attempts to use Xvfb via PyVirtualDisplay for a
+    virtual display. Falls back to headless if Xvfb is unavailable.
+    Returns (browser, display) tuple. Caller must stop display after browser.close().
+    """
+    display = None
+    if not headless and not os.environ.get("DISPLAY"):
+        try:
+            from pyvirtualdisplay import Display
+            display = Display(visible=0, size=(1920, 1080))
+            display.start()
+            logger.info("Started Xvfb virtual display")
+        except (ImportError, FileNotFoundError) as exc:
+            logger.warning("Xvfb unavailable (%s), falling back to headless", exc)
+            headless = True
+
     browser = await playwright.chromium.launch(
-        headless=True,
+        headless=headless,
         args=_BROWSER_ARGS,
     )
-    return browser
+    return browser, display
 
 
 async def _new_stealth_page(browser):
