@@ -125,3 +125,111 @@ class TestTruncateNote:
         from src.agents.linkedin_pipeline import truncate_note
         note = "x" * 300
         assert len(truncate_note(note)) == 300
+
+
+class TestRunLinkedinPipelineIntegration:
+    """Integration test: full pipeline with mocked LLM, Playwright, and Apollo."""
+
+    @pytest.fixture
+    def db_path(self, tmp_path, monkeypatch):
+        import sqlite3
+        path = str(tmp_path / "test.db")
+        monkeypatch.setenv("JOBTRACKER_DB_PATH", path)
+        conn = sqlite3.connect(path)
+        conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, title TEXT, company TEXT, description TEXT)")
+        conn.execute("INSERT INTO jobs (id, title, company, description) VALUES (1, 'SWE', 'Stripe', 'Build payment APIs at stripe.com. Looking for senior engineers.')")
+        conn.commit()
+        conn.close()
+        from src.agents.linkedin_db import ensure_linkedin_tables
+        ensure_linkedin_tables(path)
+        return path
+
+    @patch("src.agents.linkedin_pipeline.get_linkedin_model")
+    @patch("src.agents.linkedin_pipeline.enrich_company_apollo", new_callable=AsyncMock)
+    @patch("src.agents.linkedin_pipeline.run_google_search", new_callable=AsyncMock)
+    @patch("src.agents.linkedin_pipeline.search_domain_google", new_callable=AsyncMock)
+    @pytest.mark.asyncio
+    async def test_full_pipeline_completes(
+        self, mock_domain_search, mock_google, mock_apollo, mock_model, db_path
+    ):
+        from src.agents.linkedin_db import load_search, load_contacts, create_search
+        from src.agents.linkedin_pipeline import run_linkedin_pipeline
+
+        # Mock LLM
+        mock_llm = MagicMock()
+        mock_model.return_value = mock_llm
+
+        # analyze_jd returns structured output
+        mock_analysis = MagicMock()
+        mock_analysis.model_dump.return_value = {
+            "role_title": "Senior Software Engineer",
+            "role_domain": "engineering",
+            "seniority": "senior",
+            "leadership_titles": ["Engineering Manager"],
+            "department_keywords": ["backend"],
+        }
+        # extract_domain returns "stripe.com"
+        mock_domain_response = MagicMock()
+        mock_domain_response.content = "stripe.com"
+
+        # score_relevance returns scores
+        mock_scores = MagicMock()
+        mock_scores.scores = [
+            MagicMock(linkedin_url="https://www.linkedin.com/in/amy", score=85, reason="Recruiter"),
+        ]
+
+        # generate_notes returns notes
+        mock_notes = MagicMock()
+        mock_notes.notes = [
+            MagicMock(linkedin_url="https://www.linkedin.com/in/amy", note="Hi Amy, I am applying for SWE at Stripe."),
+        ]
+
+        # compile_summary returns summary
+        mock_summary = MagicMock()
+        mock_summary.summary = "Stripe is a fintech company."
+
+        # leadership review
+        mock_review = MagicMock()
+        mock_review.needs_retry = False
+        mock_review.relevant_count = 1
+        mock_review.total_count = 1
+        mock_review.refined_query = None
+
+        # Chain the mock calls
+        structured_mock = MagicMock()
+        call_count = {"n": 0}
+        returns = [mock_analysis, mock_review, mock_scores, mock_notes, mock_summary]
+
+        def invoke_side_effect(messages):
+            idx = call_count["n"]
+            call_count["n"] += 1
+            if idx < len(returns):
+                return returns[idx]
+            return returns[-1]
+
+        structured_mock.invoke = invoke_side_effect
+        mock_llm.with_structured_output.return_value = structured_mock
+        mock_llm.invoke.return_value = mock_domain_response
+
+        # Mock Apollo
+        mock_apollo.return_value = {"name": "Stripe", "estimated_num_employees": 8000}
+
+        # Mock Google search results
+        mock_google.return_value = [
+            {"name": "Amy Salazar", "title": "Recruiter", "location": "Miami", "linkedin_url": "https://www.linkedin.com/in/amy"},
+        ]
+        mock_domain_search.return_value = None  # domain extracted from JD
+
+        # Patch playwright to mock browser
+        with patch("playwright.async_api.async_playwright") as mock_pw:
+            mock_browser = AsyncMock()
+            mock_pw.return_value.__aenter__ = AsyncMock(return_value=MagicMock(chromium=MagicMock(launch=AsyncMock(return_value=mock_browser))))
+            mock_browser.close = AsyncMock()
+
+            search_id = create_search(job_id=1)
+            await run_linkedin_pipeline(search_id, 1)
+
+        search = load_search(search_id)
+        assert search["status"] == "completed"
+        contacts = load_contacts(search_id)
+        assert len(contacts) >= 1
