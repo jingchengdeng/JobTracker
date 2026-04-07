@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/linkedin")
 
+_background_tasks: set[asyncio.Task] = set()
+
 
 class SearchRequest(BaseModel):
     job_id: int
@@ -32,7 +34,9 @@ async def start_search(req: SearchRequest):
         raise HTTPException(status_code=404, detail="Job not found")
 
     search_id = create_search(job_id=req.job_id)
-    asyncio.create_task(run_linkedin_pipeline(search_id, req.job_id))
+    task = asyncio.create_task(run_linkedin_pipeline(search_id, req.job_id))
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
     return {"search_id": search_id, "status": "running"}
 
 
