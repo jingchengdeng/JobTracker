@@ -17,43 +17,9 @@ export function useLinkedInSearch(jobId: number) {
     };
   }, []);
 
-  // Load existing search on mount
-  useEffect(() => {
-    async function loadExisting() {
-      const res = await fetch(`/api/ai/linkedin/job/${jobId}`);
-      if (res.ok) {
-        const data: LinkedinSearchResult = await res.json();
-        if (data.search) {
-          setSearch(data.search);
-          setCompany(data.company);
-          setContacts(data.contacts);
-        }
-      }
-    }
-    loadExisting();
-  }, [jobId]);
-
-  const startSearch = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    const res = await fetch("/api/ai/linkedin/search", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id: jobId }),
-    });
-    if (!res.ok) {
-      setError("Failed to start search");
-      setLoading(false);
-      return;
-    }
-    const data = await res.json();
-    const searchId = data.search_id;
-    setSearch({ id: searchId, status: "running", started_at: new Date().toISOString(), completed_at: null });
-    setCompany(null);
-    setContacts([]);
-
-    // Poll for completion
+  const startPolling = useCallback((searchId: number) => {
     if (pollRef.current) clearInterval(pollRef.current);
+    setLoading(true);
     let elapsed = 0;
     const poll = setInterval(async () => {
       elapsed += 1500;
@@ -84,7 +50,48 @@ export function useLinkedInSearch(jobId: number) {
       }
     }, 1500);
     pollRef.current = poll;
-  }, [jobId]);
+  }, []);
+
+  // Load existing search on mount, resume polling if still running
+  useEffect(() => {
+    async function loadExisting() {
+      const res = await fetch(`/api/ai/linkedin/job/${jobId}`);
+      if (res.ok) {
+        const data: LinkedinSearchResult = await res.json();
+        if (data.search) {
+          setSearch(data.search);
+          setCompany(data.company);
+          setContacts(data.contacts);
+
+          if (data.search.status === "running") {
+            startPolling(data.search.id);
+          }
+        }
+      }
+    }
+    loadExisting();
+  }, [jobId, startPolling]);
+
+  const startSearch = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    const res = await fetch("/api/ai/linkedin/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ job_id: jobId }),
+    });
+    if (!res.ok) {
+      setError("Failed to start search");
+      setLoading(false);
+      return;
+    }
+    const data = await res.json();
+    const searchId = data.search_id;
+    setSearch({ id: searchId, status: "running", started_at: new Date().toISOString(), completed_at: null });
+    setCompany(null);
+    setContacts([]);
+    startPolling(searchId);
+  }, [jobId, startPolling]);
 
   const deleteSearch = useCallback(async () => {
     if (!search) return;
