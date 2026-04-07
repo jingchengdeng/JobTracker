@@ -133,7 +133,10 @@ def run_extract_domain(job: dict) -> str | None:
         f"Job description:\n{description[:3000]}"
     )
     response = llm.invoke([HumanMessage(content=prompt)])
-    text = response.content.strip().lower()
+    raw = response.content
+    if isinstance(raw, list):
+        raw = "".join(block.get("text", "") if isinstance(block, dict) else str(block) for block in raw)
+    text = raw.strip().lower()
     if text == "none" or len(text) > 100 or " " in text:
         return None
     # Clean up common prefixes
