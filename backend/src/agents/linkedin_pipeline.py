@@ -256,6 +256,7 @@ async def enrich_company_apollo(domain: str) -> dict | None:
     """Call Apollo Organization Enrichment API."""
     api_key = load_api_key("apollo")
     if not api_key:
+        logger.info("No Apollo API key configured, skipping enrichment")
         return None
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
@@ -336,6 +337,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
         if job.get("description"):
             loop = asyncio.get_running_loop()
             domain = await loop.run_in_executor(None, run_extract_domain, job)
+        logger.info("Domain from JD extraction: %s", domain)
 
         # 4. Browser domain search (if needed)
         company_data = None
@@ -345,12 +347,14 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
             try:
                 if not domain:
                     domain = await search_domain_google(browser, job["company"])
+                    logger.info("Domain from Google search: %s", domain)
                     await asyncio.sleep(SEARCH_DELAY_SECONDS)
 
                 # 5. Apollo enrichment (if domain found + key configured)
                 company_data = None
                 if domain:
                     company_data = await enrich_company_apollo(domain)
+                    logger.info("Apollo enrichment result: %s", "success" if company_data else "no data")
 
                 # 6. Build and run search queries
                 queries = build_search_queries(job["company"], analysis)

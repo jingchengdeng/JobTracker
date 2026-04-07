@@ -38,8 +38,8 @@ class TestIsCaptchaPage:
         text = "Please complete the captcha to continue using Google."
         assert is_captcha_page(text) is True
 
-    def test_blocked_keyword_detected(self):
-        text = "Your request has been blocked by our automated systems."
+    def test_not_a_robot_detected(self):
+        text = "Please verify you're not a robot to continue."
         assert is_captcha_page(text) is True
 
     def test_automated_queries_detected(self):

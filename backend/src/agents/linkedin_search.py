@@ -33,13 +33,17 @@ def build_search_url(query: str) -> str:
 def is_captcha_page(page_text: str) -> bool:
     """Check if page content indicates a Google CAPTCHA or block."""
     lower = page_text.lower()
-    return any(marker in lower for marker in [
+    markers = [
         "unusual traffic",
         "captcha",
-        "blocked",
         "automated queries",
         "not a robot",
-    ])
+    ]
+    for marker in markers:
+        if marker in lower:
+            logger.warning("CAPTCHA marker matched: '%s'", marker)
+            return True
+    return False
 
 
 def _extract_name_near_url(lines: list[str], url_idx: int) -> tuple[str, str]:
