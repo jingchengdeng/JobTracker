@@ -31,7 +31,8 @@ class ExtractTextRequest(BaseModel):
 @router.post("/extract-text")
 async def extract_resume_text(req: ExtractTextRequest):
     from pathlib import Path
-    data_dir = Path("data").resolve()
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    data_dir = (project_root / "data").resolve()
     resolved = Path(req.file_path).resolve()
     if not str(resolved).startswith(str(data_dir) + "/"):
         raise HTTPException(status_code=400, detail="Invalid file path")
