@@ -7,6 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -23,6 +30,14 @@ interface AuthProfile {
   email?: string;
   status: "active" | "connected" | "expired";
 }
+
+const API_KEY_PROVIDERS = [
+  { value: "openai", label: "OpenAI" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "kimi", label: "Kimi" },
+  { value: "apollo", label: "Apollo" },
+  { value: "brave", label: "Brave Search" },
+] as const;
 
 export function SettingsApiKeys() {
   const [profiles, setProfiles] = useState<AuthProfile[]>([]);
@@ -200,14 +215,19 @@ export function SettingsApiKeys() {
               </DialogHeader>
               <form onSubmit={handleAdd} className="space-y-4">
                 <div className="space-y-1.5">
-                  <Label htmlFor="api-provider">Provider</Label>
-                  <Input
-                    id="api-provider"
-                    value={provider}
-                    onChange={(e) => setProvider(e.target.value)}
-                    placeholder="e.g. openai, anthropic, kimi, apollo"
-                    required
-                  />
+                  <Label>Provider</Label>
+                  <Select value={provider} onValueChange={(v) => v && setProvider(v)}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select a provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {API_KEY_PROVIDERS.map((p) => (
+                        <SelectItem key={p.value} value={p.value}>
+                          {p.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="api-key">Key</Label>
