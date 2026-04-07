@@ -13,7 +13,7 @@ from src.agents.linkedin_db import (
 from src.agents.linkedin_schemas import (
     JdAnalysis, RelevanceScores, ConnectionNotes, CompanySummary, LeadershipReview,
 )
-from src.agents.linkedin_search import run_google_search, SEARCH_DELAY_SECONDS
+from src.agents.linkedin_search import run_google_search, launch_stealth_browser, _new_stealth_page, SEARCH_DELAY_SECONDS
 from src.models.provider import get_linkedin_model
 from src.auth.credentials import load_api_key
 
@@ -256,7 +256,7 @@ async def enrich_company_apollo(domain: str) -> dict | None:
     """Call Apollo Organization Enrichment API."""
     api_key = load_api_key("apollo")
     if not api_key:
-        logger.info("No Apollo API key configured, skipping enrichment")
+        logger.warning("No Apollo API key configured, skipping enrichment")
         return None
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(
@@ -278,11 +278,11 @@ async def search_domain_google(browser, company: str) -> str | None:
     from src.agents.linkedin_search import build_search_url
     import re
 
-    page = await browser.new_page()
+    page = await _new_stealth_page(browser)
     try:
         url = build_search_url(f'"{company}" official website')
         await page.goto(url, wait_until="domcontentloaded", timeout=15000)
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(1.5)
         text = await page.inner_text("body")
 
         # Look for domain patterns in results
@@ -298,7 +298,7 @@ async def search_domain_google(browser, company: str) -> str | None:
         logger.warning("Domain search failed for '%s': %s", company, exc)
         return None
     finally:
-        await page.close()
+        await page.context.close()
 
 
 # --- Main pipeline entry point ---
@@ -337,24 +337,24 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
         if job.get("description"):
             loop = asyncio.get_running_loop()
             domain = await loop.run_in_executor(None, run_extract_domain, job)
-        logger.info("Domain from JD extraction: %s", domain)
+        logger.warning("Domain from JD extraction: %s", domain)
 
         # 4. Browser domain search (if needed)
         company_data = None
         from playwright.async_api import async_playwright
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(headless=True)
+            browser = await launch_stealth_browser(pw)
             try:
                 if not domain:
                     domain = await search_domain_google(browser, job["company"])
-                    logger.info("Domain from Google search: %s", domain)
+                    logger.warning("Domain from Google search: %s", domain)
                     await asyncio.sleep(SEARCH_DELAY_SECONDS)
 
                 # 5. Apollo enrichment (if domain found + key configured)
                 company_data = None
                 if domain:
                     company_data = await enrich_company_apollo(domain)
-                    logger.info("Apollo enrichment result: %s", "success" if company_data else "no data")
+                    logger.warning("Apollo enrichment result: %s", "success" if company_data else "no data")
 
                 # 6. Build and run search queries
                 queries = build_search_queries(job["company"], analysis)
