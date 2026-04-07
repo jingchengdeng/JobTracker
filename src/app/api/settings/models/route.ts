@@ -15,6 +15,7 @@ interface ModelConfig {
   classifier: RoleConfig;
   embedding: RoleConfig;
   interview: RoleConfig;
+  linkedin: RoleConfig;
 }
 
 const DEFAULT_CONFIG: ModelConfig = {
@@ -22,6 +23,7 @@ const DEFAULT_CONFIG: ModelConfig = {
   classifier: { provider: "openai", model: "gpt-4o-mini", fallback: null },
   embedding: { provider: "openai", model: "text-embedding-3-small", fallback: null },
   interview: { provider: "openai", model: "gpt-5.4-mini", fallback: null },
+  linkedin: { provider: "openai", model: "gpt-4o-mini", fallback: null },
 };
 
 function migrateConfig(raw: Record<string, unknown>): ModelConfig {
@@ -32,6 +34,7 @@ function migrateConfig(raw: Record<string, unknown>): ModelConfig {
       classifier: cfg.classifier ?? DEFAULT_CONFIG.classifier,
       embedding: cfg.embedding ?? DEFAULT_CONFIG.embedding,
       interview: cfg.interview ?? DEFAULT_CONFIG.interview,
+      linkedin: cfg.linkedin ?? DEFAULT_CONFIG.linkedin,
     };
   }
   return {
@@ -51,6 +54,7 @@ function migrateConfig(raw: Record<string, unknown>): ModelConfig {
       fallback: null,
     },
     interview: DEFAULT_CONFIG.interview,
+    linkedin: DEFAULT_CONFIG.linkedin,
   };
 }
 
@@ -96,6 +100,11 @@ export async function PUT(request: NextRequest) {
       provider: body.interview?.provider ?? DEFAULT_CONFIG.interview.provider,
       model: body.interview?.model ?? DEFAULT_CONFIG.interview.model,
       fallback: body.interview?.fallback ?? null,
+    },
+    linkedin: {
+      provider: body.linkedin?.provider ?? DEFAULT_CONFIG.linkedin.provider,
+      model: body.linkedin?.model ?? DEFAULT_CONFIG.linkedin.model,
+      fallback: body.linkedin?.fallback ?? null,
     },
   };
   writeConfig(config);

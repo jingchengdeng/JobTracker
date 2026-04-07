@@ -45,3 +45,35 @@ class TestInterviewModelConfig:
         mock_create.return_value = MagicMock()
         get_interview_model()
         mock_create.assert_called_once_with("openai", "gpt-5.4-mini")
+
+
+class TestLinkedinModelConfig:
+    def test_default_config_includes_linkedin(self):
+        from src.auth.credentials import DEFAULT_MODEL_CONFIG
+        assert "linkedin" in DEFAULT_MODEL_CONFIG
+        assert DEFAULT_MODEL_CONFIG["linkedin"]["provider"] == "openai"
+        assert DEFAULT_MODEL_CONFIG["linkedin"]["model"] == "gpt-4o-mini"
+
+    def test_migrate_old_config_backfills_linkedin(self):
+        from src.auth.credentials import _migrate_model_config
+        old = {
+            "default": {"provider": "openai", "model": "gpt-5.4", "fallback": None},
+            "classifier": {"provider": "openai", "model": "gpt-4o-mini", "fallback": None},
+            "embedding": {"provider": "openai", "model": "text-embedding-3-small", "fallback": None},
+            "interview": {"provider": "openai", "model": "gpt-5.4", "fallback": None},
+        }
+        result = _migrate_model_config(old)
+        assert "linkedin" in result
+        assert result["linkedin"]["provider"] == "openai"
+
+    def test_migrate_preserves_existing_linkedin(self):
+        from src.auth.credentials import _migrate_model_config
+        existing = {
+            "default": {"provider": "openai", "model": "gpt-5.4", "fallback": None},
+            "classifier": {"provider": "openai", "model": "gpt-4o-mini", "fallback": None},
+            "embedding": {"provider": "openai", "model": "text-embedding-3-small", "fallback": None},
+            "interview": {"provider": "openai", "model": "gpt-5.4", "fallback": None},
+            "linkedin": {"provider": "anthropic", "model": "claude-haiku-4-5", "fallback": None},
+        }
+        result = _migrate_model_config(existing)
+        assert result["linkedin"]["provider"] == "anthropic"
