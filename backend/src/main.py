@@ -164,10 +164,12 @@ app.add_middleware(
 from src.api.routes import router
 from src.api.embedding_routes import router as embedding_router
 from src.api.interview_routes import router as interview_router
+from src.api.linkedin_routes import router as linkedin_router
 
 app.include_router(router)
 app.include_router(embedding_router)
 app.include_router(interview_router)
+app.include_router(linkedin_router)
 
 
 from fastapi import WebSocket
