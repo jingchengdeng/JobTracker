@@ -325,16 +325,17 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
         # 2. Analyze JD (if full mode)
         analysis = None
         if mode == "full":
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             analysis = await loop.run_in_executor(None, run_analyze_jd, job)
 
         # 3. Extract domain
         domain = None
         if job.get("description"):
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             domain = await loop.run_in_executor(None, run_extract_domain, job)
 
         # 4. Browser domain search (if needed)
+        company_data = None
         from playwright.async_api import async_playwright
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(headless=True)
@@ -359,7 +360,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
 
                 # 7. Review leadership results (if applicable)
                 if "leadership" in search_results and analysis:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     review = await loop.run_in_executor(
                         None, run_review_leadership, search_results["leadership"], analysis["role_domain"]
                     )
@@ -377,7 +378,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
 
         # 9. Score relevance
         if merged:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             merged = await loop.run_in_executor(None, run_score_relevance, merged, job, analysis)
 
         # 10. Filter and rank
@@ -385,13 +386,13 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
 
         # 11. Generate connection notes
         if ranked:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             ranked = await loop.run_in_executor(None, run_generate_notes, ranked, job)
 
         # 12. Compile company summary
         summary = None
         if company_data:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             summary = await loop.run_in_executor(None, run_compile_summary, company_data, job)
 
         # 13. Save results
