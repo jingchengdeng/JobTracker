@@ -132,6 +132,7 @@ def _fallback_to_env(provider: str) -> Optional[dict]:
         "openrouter": "OPENROUTER_API_KEY",
         "kimi": "KIMI_API_KEY",
         "apollo": "APOLLO_API_KEY",
+        "brave": "BRAVE_API_KEY",
     }
     env_var = env_map.get(provider)
     if env_var:
