@@ -70,7 +70,7 @@ _DOMAIN_EXCLUDED = {
     "facebook.com",
     "twitter.com",
     "wikipedia.org",
-    "search.brave.com",
+    "brave.com",
 }
 
 

@@ -41,7 +41,7 @@ class TestIsCaptchaPage:
         text = "Please complete the captcha to continue using Google."
         assert is_captcha_page(text) is True
 
-    def test_not_a_robot_detected(self):
+    def test_not_a_robot_detected_v1(self):
         text = "Please verify you're not a robot to continue."
         assert is_captcha_page(text) is True
 
@@ -49,7 +49,7 @@ class TestIsCaptchaPage:
         text = "We do not allow automated queries to our systems."
         assert is_captcha_page(text) is True
 
-    def test_not_a_robot_detected(self):
+    def test_not_a_robot_detected_v2(self):
         text = "Please verify you are not a robot before proceeding."
         assert is_captcha_page(text) is True
 
