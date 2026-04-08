@@ -1,0 +1,95 @@
+import json
+import os
+
+import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from src.api.extension_routes import router
+
+
+@pytest.fixture
+def extractions_dir(tmp_path):
+    d = tmp_path / "extractions"
+    d.mkdir()
+    return d
+
+
+@pytest.fixture
+def client(extractions_dir, monkeypatch):
+    monkeypatch.setenv("EXTRACTIONS_DIR", str(extractions_dir))
+    app = FastAPI()
+    app.include_router(router)
+    return TestClient(app)
+
+
+VALID_PAYLOAD = {
+    "url": "https://www.linkedin.com/jobs/view/123456/",
+    "extracted": {
+        "title": "Senior Software Engineer",
+        "company": "Acme Corp",
+        "description": "About the job. We are looking for a senior engineer...",
+        "location": "Tampa, FL",
+        "workMode": "Hybrid",
+        "salary": "$150K/yr - $230K/yr",
+        "jobType": "Full-time",
+    },
+    "rawPanelText": "Full raw text of the job panel goes here...",
+    "timestamp": "2026-04-08T12-34-56",
+}
+
+
+class TestExtractEndpoint:
+    def test_saves_file_and_returns_filename(self, client, extractions_dir):
+        resp = client.post("/api/extension/extract", json=VALID_PAYLOAD)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["filename"].endswith(".txt")
+
+        files = list(extractions_dir.iterdir())
+        assert len(files) == 1
+        content = files[0].read_text()
+        assert "https://www.linkedin.com/jobs/view/123456/" in content
+        assert "Senior Software Engineer" in content
+        assert "Acme Corp" in content
+        assert "Full raw text of the job panel goes here..." in content
+
+    def test_file_contains_all_sections(self, client, extractions_dir):
+        resp = client.post("/api/extension/extract", json=VALID_PAYLOAD)
+        assert resp.status_code == 200
+        files = list(extractions_dir.iterdir())
+        content = files[0].read_text()
+        assert "=== URL ===" in content
+        assert "=== EXTRACTED FIELDS ===" in content
+        assert "=== RAW PANEL TEXT ===" in content
+
+    def test_missing_extracted_fields_still_saves(self, client, extractions_dir):
+        payload = {
+            "url": "https://www.linkedin.com/jobs/view/999/",
+            "extracted": {},
+            "rawPanelText": "Some raw text",
+            "timestamp": "2026-04-08T12-00-00",
+        }
+        resp = client.post("/api/extension/extract", json=payload)
+        assert resp.status_code == 200
+        files = list(extractions_dir.iterdir())
+        assert len(files) == 1
+
+    def test_missing_url_returns_422(self, client):
+        payload = {
+            "extracted": {},
+            "rawPanelText": "text",
+            "timestamp": "2026-04-08T12-00-00",
+        }
+        resp = client.post("/api/extension/extract", json=payload)
+        assert resp.status_code == 422
+
+    def test_missing_raw_panel_text_returns_422(self, client):
+        payload = {
+            "url": "https://www.linkedin.com/jobs/view/123/",
+            "extracted": {},
+            "timestamp": "2026-04-08T12-00-00",
+        }
+        resp = client.post("/api/extension/extract", json=payload)
+        assert resp.status_code == 422
