@@ -108,7 +108,7 @@ export function SettingsPreferences() {
           No preferences yet. Add some to help the AI tailor recommendations.
         </p>
       ) : (
-        <ul className="divide-y rounded-lg border">
+        <ul className="divide-y divide-white/[0.06] rounded-lg border border-white/[0.06]">
           {preferences.map((pref) => (
             <li key={pref.id} className="flex items-center gap-2 px-3 py-2.5">
               {editingId === pref.id ? (
