@@ -190,8 +190,6 @@
       if (text.length < 300) continue;
 
       const textLower = text.toLowerCase();
-      const isNoise = NOISE_PATTERNS.some((p) => textLower.includes(p));
-      if (isNoise) continue;
 
       let score = 0;
 
@@ -208,7 +206,7 @@
         score += 10;
       }
 
-      if (node.querySelector("h1, h2, h3, [role='heading']")) {
+      if (node.querySelector("h1, h2, [role='heading']")) {
         score += 5;
       }
 
@@ -238,6 +236,7 @@
         const rect = current.getBoundingClientRect();
         if (rect.height > 5000) break;
         container = current;
+        break;
       }
       current = current.parentElement;
     }
@@ -276,8 +275,8 @@
       if (titleEl) {
         const parent = titleEl.parentElement;
         if (parent) {
-          const siblings = parent.querySelectorAll("a, span, div, p");
-          for (const el of siblings) {
+          for (const el of parent.children) {
+            if (el === titleEl) continue;
             const text = el.innerText.trim();
             if (
               text.length >= 2 &&
@@ -325,7 +324,8 @@
     // --- Work Mode ---
     for (const term of WORK_MODE_TERMS) {
       if (containerLower.includes(term)) {
-        fields.workMode = term.charAt(0).toUpperCase() + term.slice(1);
+        const raw = term.charAt(0).toUpperCase() + term.slice(1);
+        fields.workMode = raw === "Onsite" ? "On-site" : raw;
         break;
       }
     }
