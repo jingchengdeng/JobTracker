@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "JobTracker - LinkedIn Saver",
+  "version": "0.1.0",
+  "description": "Extract job data from LinkedIn and save to JobTracker",
+  "permissions": ["activeTab", "storage"],
+  "content_scripts": [
+    {
+      "matches": ["*://*.linkedin.com/jobs/*"],
+      "js": ["content.js"],
+      "css": ["styles.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
