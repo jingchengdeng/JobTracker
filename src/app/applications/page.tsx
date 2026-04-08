@@ -95,9 +95,14 @@ export default function ApplicationsPage() {
           onClose={() => setAiJob(null)}
         />
       ) : (
-        <div className="space-y-4 p-6">
+        <div className="space-y-6 px-8 py-6">
           <div className="flex items-center justify-between">
-            <h1 className="text-2xl font-bold">Applications</h1>
+            <div>
+              <h1 className="text-2xl font-bold tracking-tight">Applications</h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                Track and manage your job applications
+              </p>
+            </div>
             <Button onClick={() => setAddingNew(true)}>
               <Plus className="mr-1.5 size-4" />
               Add Job
