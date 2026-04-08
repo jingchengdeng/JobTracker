@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { ArrowUpDown } from "lucide-react";
+import { ArrowUpDown, Search } from "lucide-react";
 import { Job, JobStatus, JOB_STATUSES, STATUS_LABELS } from "@/lib/types";
 import {
   Table,
@@ -22,6 +22,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
 import { StarRating } from "@/components/star-rating";
+import { Card } from "@/components/ui/card";
 
 interface JobTableProps {
   jobs: Job[];
@@ -32,7 +33,7 @@ type SortKey = "title" | "company" | "status" | "priority" | "dateApplied";
 type SortDir = "asc" | "desc";
 
 function formatSalary(min: number | null, max: number | null): string {
-  if (!min && !max) return "—";
+  if (!min && !max) return "\u2014";
   const fmt = (n: number) => {
     if (n >= 1000) return `$${Math.round(n / 1000)}k`;
     return `$${n}`;
@@ -40,11 +41,11 @@ function formatSalary(min: number | null, max: number | null): string {
   if (min && max) return `${fmt(min)}-${fmt(max)}`;
   if (min) return `${fmt(min)}+`;
   if (max) return `Up to ${fmt(max)}`;
-  return "—";
+  return "\u2014";
 }
 
 function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "—";
+  if (!dateStr) return "\u2014";
   const date = new Date(dateStr);
   return date.toLocaleDateString("en-US", {
     year: "numeric",
@@ -123,23 +124,26 @@ export function JobTable({ jobs, onRowClick }: JobTableProps) {
     <Button
       variant="ghost"
       size="sm"
-      className="-ml-2.5 h-auto gap-1 font-medium"
+      className="-ml-2.5 h-auto gap-1 font-medium text-muted-foreground"
       onClick={() => handleSort(colKey)}
     >
       {label}
-      <ArrowUpDown className="size-3.5 text-muted-foreground" />
+      <ArrowUpDown className="size-3 opacity-50" />
     </Button>
   );
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          placeholder="Search by title or company..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-64"
-        />
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search by title or company..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+          />
+        </div>
         <Select
           value={statusFilter}
           onValueChange={(val) =>
@@ -160,67 +164,69 @@ export function JobTable({ jobs, onRowClick }: JobTableProps) {
         </Select>
       </div>
 
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>
-              <SortHeader label="Title" colKey="title" />
-            </TableHead>
-            <TableHead>
-              <SortHeader label="Company" colKey="company" />
-            </TableHead>
-            <TableHead>
-              <SortHeader label="Status" colKey="status" />
-            </TableHead>
-            <TableHead>Salary</TableHead>
-            <TableHead>Location</TableHead>
-            <TableHead>
-              <SortHeader label="Priority" colKey="priority" />
-            </TableHead>
-            <TableHead>
-              <SortHeader label="Date Applied" colKey="dateApplied" />
-            </TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {filtered.length === 0 ? (
-            <TableRow>
-              <TableCell
-                colSpan={7}
-                className="h-24 text-center text-muted-foreground"
-              >
-                No jobs found. Add your first application!
-              </TableCell>
+      <Card className="overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              <TableHead>
+                <SortHeader label="Title" colKey="title" />
+              </TableHead>
+              <TableHead>
+                <SortHeader label="Company" colKey="company" />
+              </TableHead>
+              <TableHead>
+                <SortHeader label="Status" colKey="status" />
+              </TableHead>
+              <TableHead>Salary</TableHead>
+              <TableHead>Location</TableHead>
+              <TableHead>
+                <SortHeader label="Priority" colKey="priority" />
+              </TableHead>
+              <TableHead>
+                <SortHeader label="Date Applied" colKey="dateApplied" />
+              </TableHead>
             </TableRow>
-          ) : (
-            filtered.map((job) => (
-              <TableRow
-                key={job.id}
-                className="cursor-pointer"
-                onClick={() => onRowClick(job.id)}
-              >
-                <TableCell className="font-medium">{job.title}</TableCell>
-                <TableCell>{job.company}</TableCell>
-                <TableCell>
-                  <StatusBadge status={job.status} />
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {formatSalary(job.salaryMin, job.salaryMax)}
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {job.location ?? "—"}
-                </TableCell>
-                <TableCell>
-                  <StarRating value={job.priority} readonly />
-                </TableCell>
-                <TableCell className="text-muted-foreground">
-                  {formatDate(job.dateApplied)}
+          </TableHeader>
+          <TableBody>
+            {filtered.length === 0 ? (
+              <TableRow>
+                <TableCell
+                  colSpan={7}
+                  className="h-32 text-center text-muted-foreground"
+                >
+                  No jobs found. Add your first application!
                 </TableCell>
               </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
+            ) : (
+              filtered.map((job) => (
+                <TableRow
+                  key={job.id}
+                  className="cursor-pointer transition-colors"
+                  onClick={() => onRowClick(job.id)}
+                >
+                  <TableCell className="font-medium">{job.title}</TableCell>
+                  <TableCell className="text-muted-foreground">{job.company}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={job.status} />
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatSalary(job.salaryMin, job.salaryMax)}
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {job.location ?? "\u2014"}
+                  </TableCell>
+                  <TableCell>
+                    <StarRating value={job.priority} readonly />
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">
+                    {formatDate(job.dateApplied)}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </Card>
     </div>
   );
 }

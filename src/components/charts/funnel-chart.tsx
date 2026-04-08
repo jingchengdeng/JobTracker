@@ -3,15 +3,15 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip, Cell } from "recharts";
 
 const STATUS_COLORS: Record<string, string> = {
-  saved: "#71717a",
+  saved: "#64748b",
   applied: "#3b82f6",
-  phone_screen: "#06b6d4",
-  interview: "#22c55e",
-  offer: "#a855f7",
-  accepted: "#10b981",
+  phone_screen: "#0ea5e9",
+  interview: "#10b981",
+  offer: "#8b5cf6",
+  accepted: "#22c55e",
   rejected: "#ef4444",
-  withdrawn: "#f97316",
-  ghosted: "#6b7280",
+  withdrawn: "#f59e0b",
+  ghosted: "#94a3b8",
 };
 
 const STATUS_LABELS: Record<string, string> = {
@@ -42,7 +42,7 @@ export function FunnelChart({ data }: FunnelChartProps) {
         <CardTitle>Applications by Status</CardTitle>
       </CardHeader>
       <CardContent>
-        <ResponsiveContainer width="100%" height={200}>
+        <ResponsiveContainer width="100%" height={220}>
           <BarChart
             data={chartData}
             layout="vertical"
@@ -53,19 +53,28 @@ export function FunnelChart({ data }: FunnelChartProps) {
               type="category"
               dataKey="label"
               width={72}
-              tick={{ fontSize: 11 }}
+              tick={{ fontSize: 12 }}
               axisLine={false}
               tickLine={false}
             />
             <Tooltip
+              isAnimationActive={false}
               formatter={(value) => [value, "Applications"]}
               cursor={{ fill: "transparent" }}
+              contentStyle={{
+                borderRadius: "10px",
+                border: "1px solid rgba(255,255,255,0.1)",
+                background: "rgba(30,27,75,0.95)",
+                color: "#e0e7ff",
+                fontSize: "12px",
+                boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+              }}
             />
-            <Bar dataKey="count" radius={[0, 4, 4, 0]}>
+            <Bar dataKey="count" radius={[0, 6, 6, 0]}>
               {chartData.map((entry, index) => (
                 <Cell
                   key={`cell-${index}`}
-                  fill={STATUS_COLORS[entry.status] ?? "#71717a"}
+                  fill={STATUS_COLORS[entry.status] ?? "#64748b"}
                 />
               ))}
             </Bar>

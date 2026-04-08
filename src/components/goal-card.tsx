@@ -39,15 +39,17 @@ export function GoalCard({ goal, onSave }: GoalCardProps) {
 
   if (showForm) {
     return (
-      <Card className="col-span-2 border-primary bg-gradient-to-br from-background to-primary/5">
-        <CardContent className="p-6 flex flex-col gap-4">
-          <div className="flex items-center gap-2">
-            <Target className="size-5 text-primary" />
+      <Card className="sm:col-span-2 border-indigo-500/15 bg-indigo-500/[0.05] dark:bg-indigo-500/[0.05]">
+        <CardContent className="p-5 flex flex-col gap-4">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-500/10">
+              <Target className="h-4 w-4 text-indigo-400" />
+            </div>
             <span className="font-semibold text-base">Set Your Goal</span>
           </div>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="flex flex-col gap-1">
-              <label className="text-sm text-muted-foreground">Type</label>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-muted-foreground">Type</label>
               <Select value={type} onValueChange={(v) => v && setType(v)}>
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select type" />
@@ -58,8 +60,8 @@ export function GoalCard({ goal, onSave }: GoalCardProps) {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-sm text-muted-foreground">Target</label>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-muted-foreground">Target</label>
               <Input
                 type="number"
                 min={1}
@@ -68,8 +70,8 @@ export function GoalCard({ goal, onSave }: GoalCardProps) {
                 onChange={(e) => setTarget(e.target.value)}
               />
             </div>
-            <div className="flex flex-col gap-1">
-              <label className="text-sm text-muted-foreground">Period Start</label>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-muted-foreground">Period Start</label>
               <Input
                 type="date"
                 value={periodStart}
@@ -108,11 +110,13 @@ export function GoalCard({ goal, onSave }: GoalCardProps) {
   }
 
   return (
-    <Card className="col-span-2 border-primary bg-gradient-to-br from-background to-primary/5">
-      <CardContent className="p-6 flex flex-col gap-4">
+    <Card className="sm:col-span-2 border-indigo-500/15 bg-indigo-500/[0.05] dark:bg-indigo-500/[0.05]">
+      <CardContent className="p-5 flex flex-col gap-4">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Target className="size-5 text-primary" />
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-500/10">
+              <Target className="h-4 w-4 text-indigo-400" />
+            </div>
             <span className="font-semibold text-base capitalize">
               {goal.type} Goal
             </span>
@@ -124,21 +128,16 @@ export function GoalCard({ goal, onSave }: GoalCardProps) {
         <p className="text-sm text-muted-foreground">
           Apply to {goal.target} jobs this {periodLabel}
         </p>
-        {/* Progress bar */}
         <div className="relative h-7 w-full overflow-hidden rounded-full bg-muted">
           <div
-            className="h-full rounded-full"
-            style={{
-              width: `${pct}%`,
-              background: "linear-gradient(to right, hsl(var(--primary)), #a855f7)",
-              transition: "width 0.4s ease",
-            }}
+            className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-indigo-400 to-violet-400 transition-all duration-500 ease-out"
+            style={{ width: `${pct}%` }}
           />
           <span className="absolute inset-0 flex items-center justify-center text-xs font-semibold">
             {goal.current} / {goal.target}
           </span>
         </div>
-        <p className="text-sm font-medium text-primary">{message}</p>
+        <p className="text-sm font-medium text-indigo-400">{message}</p>
       </CardContent>
     </Card>
   );

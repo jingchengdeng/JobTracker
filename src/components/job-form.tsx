@@ -118,7 +118,7 @@ export function JobForm({ initialData, onSubmit, onCancel }: JobFormProps) {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="border-b px-6 py-4">
+      <div className="border-b border-white/[0.06] px-6 py-4">
         <h2 className="text-lg font-semibold">
           {isEditing ? "Edit Job" : "Add Job"}
         </h2>
@@ -352,7 +352,7 @@ export function JobForm({ initialData, onSubmit, onCancel }: JobFormProps) {
       </ScrollArea>
 
       {/* Footer */}
-      <div className="flex justify-end gap-2 border-t px-6 py-4">
+      <div className="flex justify-end gap-2 border-t border-white/[0.06] px-6 py-4">
         <Button type="button" variant="outline" onClick={onCancel}>
           Cancel
         </Button>

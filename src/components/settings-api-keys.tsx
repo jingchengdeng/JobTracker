@@ -173,7 +173,7 @@ export function SettingsApiKeys() {
         {oauthProfiles.length === 0 ? (
           <p className="text-sm text-muted-foreground">No subscription accounts connected.</p>
         ) : (
-          <ul className="divide-y rounded-lg border">
+          <ul className="divide-y divide-white/[0.06] rounded-lg border border-white/[0.06]">
             {oauthProfiles.map((profile) => (
               <li key={profile.id} className="flex items-center justify-between px-3 py-2.5">
                 <div className="space-y-0.5">
@@ -257,7 +257,7 @@ export function SettingsApiKeys() {
         {apiKeyProfiles.length === 0 ? (
           <p className="text-sm text-muted-foreground">No API keys saved yet.</p>
         ) : (
-          <ul className="divide-y rounded-lg border">
+          <ul className="divide-y divide-white/[0.06] rounded-lg border border-white/[0.06]">
             {apiKeyProfiles.map((profile) => (
               <li key={profile.id} className="flex items-center justify-between px-3 py-2.5">
                 <div className="space-y-0.5">

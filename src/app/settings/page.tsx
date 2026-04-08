@@ -18,19 +18,24 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<TabId>("api-keys");
 
   return (
-    <div className="space-y-6 p-6">
-      <h1 className="text-2xl font-bold">Settings</h1>
+    <div className="space-y-6 px-8 py-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Settings</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Configure API keys, models, and preferences
+        </p>
+      </div>
 
-      <div className="flex gap-4 border-b">
+      <div className="flex gap-1">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id)}
             className={cn(
-              "pb-2 text-sm font-medium transition-colors",
+              "rounded-lg px-4 py-2 text-sm font-medium transition-colors cursor-pointer",
               activeTab === tab.id
-                ? "border-b-2 border-primary text-primary"
-                : "text-muted-foreground hover:text-foreground"
+                ? "bg-indigo-500/15 text-indigo-300 dark:text-indigo-300 text-indigo-700"
+                : "text-muted-foreground hover:bg-white/[0.05] hover:text-foreground"
             )}
           >
             {tab.label}
@@ -38,9 +43,11 @@ export default function SettingsPage() {
         ))}
       </div>
 
-      {activeTab === "api-keys" && <SettingsApiKeys />}
-      {activeTab === "model" && <SettingsModels />}
-      {activeTab === "preferences" && <SettingsPreferences />}
+      <div className="pt-2">
+        {activeTab === "api-keys" && <SettingsApiKeys />}
+        {activeTab === "model" && <SettingsModels />}
+        {activeTab === "preferences" && <SettingsPreferences />}
+      </div>
     </div>
   );
 }

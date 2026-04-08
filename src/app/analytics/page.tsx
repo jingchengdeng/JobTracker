@@ -75,19 +75,34 @@ export default function AnalyticsPage() {
   const weeklyGoal = data.goalProgress.find((g) => g.type === "weekly") ?? null;
 
   return (
-    <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-bold">Analytics &amp; Goals</h1>
-
-      {/* Top row: 5-column grid */}
-      <div className="grid grid-cols-5 gap-4">
-        <GoalCard goal={weeklyGoal} onSave={handleGoalSave} />
-        <StatCard label="Total Applied" value={data.totalApplied} color="#6366f1" />
-        <StatCard label="Interviews" value={data.totalInterviews} color="#22c55e" />
-        <StatCard label="Response Rate" value={`${data.responseRate}%`} color="#f59e0b" />
+    <div className="flex flex-col gap-6 px-8 py-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Analytics &amp; Goals</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Monitor your progress and track key metrics
+        </p>
       </div>
 
-      {/* Chart grid: 2x2 */}
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <GoalCard goal={weeklyGoal} onSave={handleGoalSave} />
+        <StatCard
+          label="Total Applied"
+          value={data.totalApplied}
+          icon="send"
+        />
+        <StatCard
+          label="Interviews"
+          value={data.totalInterviews}
+          icon="users"
+        />
+        <StatCard
+          label="Response Rate"
+          value={`${data.responseRate}%`}
+          icon="trending-up"
+        />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <FunnelChart data={data.byStatus} />
         <TimelineChart data={data.byWeek} />
         <SourceChart data={data.bySource} />

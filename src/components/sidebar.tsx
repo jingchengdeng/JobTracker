@@ -2,95 +2,68 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ClipboardList, BarChart3, FileText, Settings } from "lucide-react";
+import { ClipboardList, BarChart3, FileText, Settings, Briefcase } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { cn } from "@/lib/utils";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 
 const navItems = [
-  {
-    href: "/applications",
-    icon: ClipboardList,
-    label: "Applications",
-  },
-  {
-    href: "/analytics",
-    icon: BarChart3,
-    label: "Analytics & Goals",
-  },
-  {
-    href: "/resumes",
-    icon: FileText,
-    label: "Resumes",
-  },
+  { href: "/applications", icon: ClipboardList, label: "Applications" },
+  { href: "/analytics", icon: BarChart3, label: "Analytics" },
+  { href: "/resumes", icon: FileText, label: "Resumes" },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
 
   return (
-    <TooltipProvider>
-      <aside className="flex h-screen w-14 flex-col items-center border-r bg-background py-4">
-        <Link
-          href="/applications"
-          className="mb-6 text-sm font-bold text-primary"
-        >
-          JT
-        </Link>
+    <aside className="flex h-screen w-14 md:w-56 flex-col border-r border-white/[0.06] bg-white/[0.03] dark:bg-white/[0.03] backdrop-blur-xl">
+      <div className="flex h-14 items-center gap-2.5 justify-center md:justify-start px-2 md:px-5">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-400 text-white shadow-sm shadow-indigo-500/25">
+          <Briefcase className="h-4 w-4" />
+        </div>
+        <span className="hidden md:inline text-base font-semibold tracking-tight">JobTracker</span>
+      </div>
 
-        <nav className="flex flex-1 flex-col items-center gap-2">
-          {navItems.map((item) => {
-            const isActive = pathname.startsWith(item.href);
-            return (
-              <Tooltip key={item.href}>
-                <TooltipTrigger
-                  render={
-                    <Link
-                      href={item.href}
-                      className={cn(
-                        "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-                        isActive
-                          ? "bg-primary/10 text-primary"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      )}
-                    />
-                  }
-                >
-                  <item.icon className="h-5 w-5" />
-                </TooltipTrigger>
-                <TooltipContent side="right">{item.label}</TooltipContent>
-              </Tooltip>
-            );
-          })}
-        </nav>
-
-        <div className="flex flex-col items-center gap-2">
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Link
-                  href="/settings"
-                  className={cn(
-                    "flex h-9 w-9 items-center justify-center rounded-lg transition-colors",
-                    pathname.startsWith("/settings")
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                  )}
-                />
-              }
+      <nav className="flex flex-1 flex-col gap-1 px-2 md:px-3 pt-2">
+        {navItems.map((item) => {
+          const isActive = pathname.startsWith(item.href);
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              title={item.label}
+              className={cn(
+                "flex items-center gap-3 rounded-lg px-0 md:px-3 py-2 text-sm font-medium transition-colors justify-center md:justify-start",
+                isActive
+                  ? "bg-indigo-500/20 text-indigo-300 dark:text-indigo-300 text-indigo-700"
+                  : "text-muted-foreground hover:bg-white/[0.05] hover:text-foreground"
+              )}
             >
-              <Settings className="h-5 w-5" />
-            </TooltipTrigger>
-            <TooltipContent side="right">Settings</TooltipContent>
-          </Tooltip>
+              <item.icon className="h-[18px] w-[18px] shrink-0" />
+              <span className="hidden md:inline">{item.label}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="flex flex-col gap-1 border-t border-white/[0.06] px-2 md:px-3 py-3">
+        <Link
+          href="/settings"
+          title="Settings"
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-0 md:px-3 py-2 text-sm font-medium transition-colors justify-center md:justify-start",
+            pathname.startsWith("/settings")
+              ? "bg-indigo-500/20 text-indigo-300 dark:text-indigo-300 text-indigo-700"
+              : "text-muted-foreground hover:bg-white/[0.05] hover:text-foreground"
+          )}
+        >
+          <Settings className="h-[18px] w-[18px] shrink-0" />
+          <span className="hidden md:inline">Settings</span>
+        </Link>
+        <div className="flex items-center gap-3 px-0 md:px-3 py-1 justify-center md:justify-start">
           <ThemeToggle />
         </div>
-      </aside>
-    </TooltipProvider>
+      </div>
+    </aside>
   );
 }
