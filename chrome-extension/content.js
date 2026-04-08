@@ -1,7 +1,7 @@
 (function () {
   "use strict";
 
-  const BACKEND_URL_DEFAULT = "http://localhost:8000";
+  const BACKEND_URL_DEFAULT = "http://localhost:3000";
   const JOB_VIEW_PATTERN = /\/jobs\/view\//;
   const URL_POLL_INTERVAL = 500;
 

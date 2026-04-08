@@ -1,4 +1,4 @@
-const DEFAULT_URL = "http://localhost:8000";
+const DEFAULT_URL = "http://localhost:3000";
 
 document.addEventListener("DOMContentLoaded", () => {
   const input = document.getElementById("backend-url");
