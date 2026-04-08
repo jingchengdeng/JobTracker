@@ -55,9 +55,14 @@ export default function ResumesPage() {
   }
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="space-y-6 px-8 py-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Resumes</h1>
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Resumes</h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Manage your resumes and track AI embeddings
+          </p>
+        </div>
         <ResumeUpload
           onUpload={async () => {
             await fetchResumes();
@@ -71,9 +76,11 @@ export default function ResumesPage() {
       )}
 
       {resumes.length === 0 ? (
-        <p className="text-muted-foreground">
-          No resumes uploaded yet. Upload your first resume to get started.
-        </p>
+        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-white/10 py-16">
+          <p className="text-muted-foreground">
+            No resumes uploaded yet. Upload your first resume to get started.
+          </p>
+        </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {resumes.map((resume) => {
