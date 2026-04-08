@@ -95,29 +95,30 @@
       setButtonState("loading", "Saving...");
 
       const backendUrl = await getBackendUrl();
-      const response = await fetch(`${backendUrl}/api/extension/extract`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: location.href,
-          extracted: result.extracted,
-          rawPanelText: result.rawPanelText,
-          timestamp: new Date().toISOString().replace(/[:.]/g, "-"),
-        }),
+      const payload = {
+        url: location.href,
+        extracted: result.extracted,
+        rawPanelText: result.rawPanelText,
+        timestamp: new Date().toISOString().replace(/[:.]/g, "-"),
+      };
+
+      const resp = await chrome.runtime.sendMessage({
+        type: "SAVE_EXTRACTION",
+        backendUrl,
+        payload,
       });
 
-      if (!response.ok) {
-        throw new Error(`Backend returned ${response.status}`);
+      if (!resp || !resp.success) {
+        throw new Error(resp?.error || "Background script error");
       }
 
-      const data = await response.json();
       setButtonState("success", "Saved!");
-      console.log("[JobTracker] Saved:", data.filename);
+      console.log("[JobTracker] Saved:", resp.data.filename);
       setTimeout(() => setButtonState(null, "Save to JobTracker"), 3000);
     } catch (err) {
       console.error("[JobTracker] Error:", err);
       const msg =
-        err.message === "Failed to fetch"
+        err.message === "Failed to fetch" || err.message.includes("Failed to fetch")
           ? "Cannot reach backend"
           : "Save failed";
       setButtonState("error", msg);
