@@ -157,6 +157,7 @@ register_exception_handlers(app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],
+    allow_origin_regex=r"^chrome-extension://.*$",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -165,11 +166,13 @@ from src.api.routes import router
 from src.api.embedding_routes import router as embedding_router
 from src.api.interview_routes import router as interview_router
 from src.api.linkedin_routes import router as linkedin_router
+from src.api.extension_routes import router as extension_router
 
 app.include_router(router)
 app.include_router(embedding_router)
 app.include_router(interview_router)
 app.include_router(linkedin_router)
+app.include_router(extension_router)
 
 
 from fastapi import WebSocket
