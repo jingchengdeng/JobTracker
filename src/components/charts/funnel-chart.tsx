@@ -58,13 +58,13 @@ export function FunnelChart({ data }: FunnelChartProps) {
               tickLine={false}
             />
             <Tooltip
+              isAnimationActive={false}
               formatter={(value) => [value, "Applications"]}
               cursor={{ fill: "transparent" }}
               contentStyle={{
                 borderRadius: "10px",
                 border: "1px solid rgba(255,255,255,0.1)",
-                background: "rgba(30,27,75,0.85)",
-                backdropFilter: "blur(20px)",
+                background: "rgba(30,27,75,0.95)",
                 color: "#e0e7ff",
                 fontSize: "12px",
                 boxShadow: "0 4px 20px rgba(0,0,0,0.3)",

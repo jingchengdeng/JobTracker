@@ -39,7 +39,7 @@ export function GoalCard({ goal, onSave }: GoalCardProps) {
 
   if (showForm) {
     return (
-      <Card className="col-span-2 border-indigo-500/15 bg-indigo-500/[0.05] dark:bg-indigo-500/[0.05] backdrop-blur-xl">
+      <Card className="col-span-2 border-indigo-500/15 bg-indigo-500/[0.05] dark:bg-indigo-500/[0.05]">
         <CardContent className="p-5 flex flex-col gap-4">
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-indigo-500/10">
@@ -110,7 +110,7 @@ export function GoalCard({ goal, onSave }: GoalCardProps) {
   }
 
   return (
-    <Card className="col-span-2 border-indigo-500/15 bg-indigo-500/[0.05] dark:bg-indigo-500/[0.05] backdrop-blur-xl">
+    <Card className="col-span-2 border-indigo-500/15 bg-indigo-500/[0.05] dark:bg-indigo-500/[0.05]">
       <CardContent className="p-5 flex flex-col gap-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">

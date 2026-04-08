@@ -27,7 +27,7 @@ export function ResumeCard({
   onReindex,
 }: ResumeCardProps) {
   return (
-    <Card className="flex flex-col gap-4 p-5 transition-all hover:shadow-lg hover:shadow-indigo-500/5 hover:border-white/10">
+    <Card className="flex flex-col gap-4 p-5 transition-[shadow,border-color] duration-200 hover:shadow-lg hover:shadow-indigo-500/5 hover:border-white/10">
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-500/10">
