@@ -2,8 +2,9 @@ import os
 import re
 import logging
 from pathlib import Path
+from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ def _get_extractions_dir() -> Path:
 
 
 def _format_extraction(req: ExtractRequest) -> str:
-    lines = [f"=== URL ===", req.url, ""]
+    lines = ["=== URL ===", req.url, ""]
 
     lines.append("=== EXTRACTED FIELDS ===")
     fields = req.extracted
@@ -67,7 +68,6 @@ def _format_extraction(req: ExtractRequest) -> str:
 
 def _slug_from_url(url: str) -> str:
     """Return the last meaningful path segment of a URL as a slug."""
-    from urllib.parse import urlparse
     path = urlparse(url).path
     segments = [s for s in path.split("/") if s]
     last = segments[-1] if segments else ""
@@ -82,7 +82,8 @@ async def extract(req: ExtractRequest):
         slug = _slugify(req.extracted.title)
     else:
         slug = _slug_from_url(req.url)
-    filename = f"{req.timestamp}_{slug}.txt"
+    safe_timestamp = _slugify(req.timestamp, max_len=30)
+    filename = f"{safe_timestamp}_{slug}.txt"
     filepath = extractions_dir / filename
 
     content = _format_extraction(req)

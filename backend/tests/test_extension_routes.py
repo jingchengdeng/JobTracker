@@ -1,4 +1,3 @@
-import json
 import os
 
 import pytest
@@ -95,3 +94,22 @@ class TestExtractEndpoint:
         }
         resp = client.post("/api/extension/extract", json=payload)
         assert resp.status_code == 422
+
+    def test_long_description_is_truncated(self, client, extractions_dir):
+        long_desc = "A" * 250
+        payload = {
+            "url": "https://www.linkedin.com/jobs/view/777/",
+            "extracted": {
+                "title": "Data Engineer",
+                "description": long_desc,
+            },
+            "rawPanelText": "raw text",
+            "timestamp": "2026-04-08T13-00-00",
+        }
+        resp = client.post("/api/extension/extract", json=payload)
+        assert resp.status_code == 200
+        files = list(extractions_dir.iterdir())
+        assert len(files) == 1
+        content = files[0].read_text()
+        assert "..." in content
+        assert long_desc not in content
