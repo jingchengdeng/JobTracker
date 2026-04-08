@@ -4,39 +4,39 @@ import type { JobStatus } from "@/lib/types";
 const statusConfig: Record<JobStatus, { label: string; className: string }> = {
   saved: {
     label: "Saved",
-    className: "bg-zinc-500/15 text-zinc-400 border-zinc-500/20",
+    className: "bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20",
   },
   applied: {
     label: "Applied",
-    className: "bg-blue-500/15 text-blue-400 border-blue-500/20",
+    className: "bg-indigo-500/15 text-indigo-700 dark:text-indigo-300 border-indigo-500/20",
   },
   phone_screen: {
     label: "Phone Screen",
-    className: "bg-cyan-500/15 text-cyan-400 border-cyan-500/20",
+    className: "bg-sky-500/15 text-sky-700 dark:text-sky-300 border-sky-500/20",
   },
   interview: {
     label: "Interview",
-    className: "bg-green-500/15 text-green-400 border-green-500/20",
+    className: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/20",
   },
   offer: {
     label: "Offer",
-    className: "bg-purple-500/15 text-purple-400 border-purple-500/20",
+    className: "bg-violet-500/15 text-violet-700 dark:text-violet-300 border-violet-500/20",
   },
   accepted: {
     label: "Accepted",
-    className: "bg-emerald-500/15 text-emerald-400 border-emerald-500/20",
+    className: "bg-green-500/15 text-green-700 dark:text-green-300 border-green-500/20",
   },
   rejected: {
     label: "Rejected",
-    className: "bg-red-500/15 text-red-400 border-red-500/20",
+    className: "bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/20",
   },
   withdrawn: {
     label: "Withdrawn",
-    className: "bg-orange-500/15 text-orange-400 border-orange-500/20",
+    className: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border-amber-500/20",
   },
   ghosted: {
     label: "Ghosted",
-    className: "bg-gray-500/15 text-gray-400 border-gray-500/20",
+    className: "bg-gray-500/10 text-gray-600 dark:text-gray-400 border-gray-500/20",
   },
 };
 
