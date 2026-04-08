@@ -65,11 +65,23 @@ def _format_extraction(req: ExtractRequest) -> str:
     return "\n".join(lines)
 
 
+def _slug_from_url(url: str) -> str:
+    """Return the last meaningful path segment of a URL as a slug."""
+    from urllib.parse import urlparse
+    path = urlparse(url).path
+    segments = [s for s in path.split("/") if s]
+    last = segments[-1] if segments else ""
+    return _slugify(last) if last else "untitled"
+
+
 @router.post("/extract")
 async def extract(req: ExtractRequest):
     extractions_dir = _get_extractions_dir()
 
-    slug = _slugify(req.extracted.title or "untitled")
+    if req.extracted.title:
+        slug = _slugify(req.extracted.title)
+    else:
+        slug = _slug_from_url(req.url)
     filename = f"{req.timestamp}_{slug}.txt"
     filepath = extractions_dir / filename
 

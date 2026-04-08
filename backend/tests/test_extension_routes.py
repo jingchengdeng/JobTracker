@@ -73,6 +73,8 @@ class TestExtractEndpoint:
         }
         resp = client.post("/api/extension/extract", json=payload)
         assert resp.status_code == 200
+        data = resp.json()
+        assert "999" in data["filename"]
         files = list(extractions_dir.iterdir())
         assert len(files) == 1
 
