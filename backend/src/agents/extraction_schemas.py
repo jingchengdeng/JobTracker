@@ -1,6 +1,6 @@
 from typing import TypedDict
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 VALID_WORK_MODES = {"remote", "hybrid", "onsite"}
@@ -8,6 +8,8 @@ VALID_JOB_TYPES = {"full_time", "part_time", "contract", "internship"}
 
 
 class LinkedInJobExtraction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     title: str = Field(description="Job title")
     company: str = Field(description="Company name")
     location: str | None = Field(default=None, description="City, State or country")
@@ -18,7 +20,7 @@ class LinkedInJobExtraction(BaseModel):
     job_type: str | None = Field(default=None, description="One of: full_time, part_time, contract, internship")
     work_mode: str | None = Field(default=None, description="One of: remote, hybrid, onsite")
 
-    @field_validator("title", "company")
+    @field_validator("title", "company", "description")
     @classmethod
     def must_not_be_blank(cls, v: str) -> str:
         if not v or not v.strip():
