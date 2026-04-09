@@ -97,7 +97,7 @@ async def extract(req: ExtractRequest):
     job_id = None
     extraction_error = None
     try:
-        pipeline_result = run_extraction_pipeline(req.rawPanelText, req.url)
+        pipeline_result = await run_extraction_pipeline(req.rawPanelText, req.url)
         job_id = pipeline_result.get("job_id")
         extraction_error = pipeline_result.get("error")
     except Exception as exc:

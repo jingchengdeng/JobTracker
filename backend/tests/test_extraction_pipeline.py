@@ -1,4 +1,4 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 
 def _make_valid_extraction(**overrides):
@@ -33,7 +33,7 @@ def _make_state(**overrides):
 
 class TestExtractFieldsNode:
     @patch("src.agents.extraction_pipeline.get_linkedin_model")
-    def test_extracts_structured_output(self, mock_get_model):
+    async def test_extracts_structured_output(self, mock_get_model):
         from src.agents.extraction_pipeline import extract_fields
 
         mock_llm = MagicMock()
@@ -44,17 +44,17 @@ class TestExtractFieldsNode:
         mock_result.model_dump.return_value = extraction_data
 
         structured_mock = MagicMock()
-        structured_mock.invoke.return_value = mock_result
+        structured_mock.ainvoke = AsyncMock(return_value=mock_result)
         mock_llm.with_structured_output.return_value = structured_mock
 
         state = _make_state()
-        result = extract_fields(state)
+        result = await extract_fields(state)
 
         assert result["extracted"] == extraction_data
         assert result["retry_count"] == 0
 
     @patch("src.agents.extraction_pipeline.get_linkedin_model")
-    def test_retry_includes_validation_errors_in_prompt(self, mock_get_model):
+    async def test_retry_includes_validation_errors_in_prompt(self, mock_get_model):
         from src.agents.extraction_pipeline import extract_fields
         from langchain_core.messages import HumanMessage
 
@@ -66,14 +66,14 @@ class TestExtractFieldsNode:
         mock_result.model_dump.return_value = extraction_data
 
         structured_mock = MagicMock()
-        structured_mock.invoke.return_value = mock_result
+        structured_mock.ainvoke = AsyncMock(return_value=mock_result)
         mock_llm.with_structured_output.return_value = structured_mock
 
         errors = ["salary_min (200000) must be <= salary_max (150000)"]
         state = _make_state(validation_errors=errors, retry_count=0)
-        result = extract_fields(state)
+        result = await extract_fields(state)
 
-        call_args = structured_mock.invoke.call_args[0][0]
+        call_args = structured_mock.ainvoke.call_args[0][0]
         human_msg = next(m for m in call_args if isinstance(m, HumanMessage))
         assert "salary_min" in human_msg.content
         assert result["retry_count"] == 1
@@ -100,34 +100,43 @@ class TestValidateFieldsNode:
 
 
 class TestInsertJobNode:
-    @patch("src.agents.extraction_pipeline.httpx.post")
-    def test_successful_insert(self, mock_post):
+    @patch("src.agents.extraction_pipeline.httpx.AsyncClient")
+    async def test_successful_insert(self, mock_client_cls):
         from src.agents.extraction_pipeline import insert_job
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"id": 42}
         mock_response.raise_for_status.return_value = None
-        mock_post.return_value = mock_response
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
 
         state = _make_state(extracted=_make_valid_extraction())
-        result = insert_job(state)
+        result = await insert_job(state)
 
         assert result["job_id"] == 42
         assert result["error"] is None
 
-        call_kwargs = mock_post.call_args
+        call_kwargs = mock_client.post.call_args
         body = call_kwargs[1]["json"]
         assert body["source"] == "linkedin"
         assert body["title"] == "Software Engineer"
 
-    @patch("src.agents.extraction_pipeline.httpx.post")
-    def test_insert_failure_sets_error(self, mock_post):
+    @patch("src.agents.extraction_pipeline.httpx.AsyncClient")
+    async def test_insert_failure_sets_error(self, mock_client_cls):
         from src.agents.extraction_pipeline import insert_job
 
-        mock_post.side_effect = Exception("Connection refused")
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(side_effect=Exception("Connection refused"))
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
 
         state = _make_state(extracted=_make_valid_extraction())
-        result = insert_job(state)
+        result = await insert_job(state)
 
         assert result["job_id"] is None
         assert result["error"] is not None
@@ -135,9 +144,9 @@ class TestInsertJobNode:
 
 
 class TestRunExtractionPipeline:
-    @patch("src.agents.extraction_pipeline.httpx.post")
+    @patch("src.agents.extraction_pipeline.httpx.AsyncClient")
     @patch("src.agents.extraction_pipeline.get_linkedin_model")
-    def test_full_pipeline_success(self, mock_get_model, mock_post):
+    async def test_full_pipeline_success(self, mock_get_model, mock_client_cls):
         from src.agents.extraction_pipeline import run_extraction_pipeline
 
         mock_llm = MagicMock()
@@ -148,15 +157,20 @@ class TestRunExtractionPipeline:
         mock_result.model_dump.return_value = extraction_data
 
         structured_mock = MagicMock()
-        structured_mock.invoke.return_value = mock_result
+        structured_mock.ainvoke = AsyncMock(return_value=mock_result)
         mock_llm.with_structured_output.return_value = structured_mock
 
         mock_response = MagicMock()
         mock_response.json.return_value = {"id": 99}
         mock_response.raise_for_status.return_value = None
-        mock_post.return_value = mock_response
 
-        result = run_extraction_pipeline(
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=mock_response)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = await run_extraction_pipeline(
             raw_text="Some linkedin job text",
             url="https://www.linkedin.com/jobs/view/999",
         )
@@ -165,12 +179,12 @@ class TestRunExtractionPipeline:
         assert result["error"] is None
 
     @patch("src.agents.extraction_pipeline.get_linkedin_model")
-    def test_pipeline_returns_error_on_llm_failure(self, mock_get_model):
+    async def test_pipeline_returns_error_on_llm_failure(self, mock_get_model):
         from src.agents.extraction_pipeline import run_extraction_pipeline
 
         mock_get_model.side_effect = ValueError("No credentials configured")
 
-        result = run_extraction_pipeline(
+        result = await run_extraction_pipeline(
             raw_text="Some linkedin job text",
             url="https://www.linkedin.com/jobs/view/999",
         )

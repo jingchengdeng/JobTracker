@@ -1,5 +1,5 @@
 import os
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import pytest
 from fastapi import FastAPI
@@ -48,7 +48,7 @@ VALID_PAYLOAD = {
 _NOOP_PIPELINE = {"job_id": None, "error": None}
 
 
-@patch("src.api.extension_routes.run_extraction_pipeline", return_value=_NOOP_PIPELINE)
+@patch("src.api.extension_routes.run_extraction_pipeline", new_callable=AsyncMock, return_value=_NOOP_PIPELINE)
 class TestExtractEndpoint:
     def test_saves_file_and_returns_filename(self, mock_pipeline, client, extractions_dir):
         resp = client.post("/api/extension/extract", json=VALID_PAYLOAD)
