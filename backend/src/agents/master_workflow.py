@@ -75,6 +75,7 @@ def fan_out(state: MasterWorkflowState) -> list[Send]:
 
 async def resume_branch(state: dict) -> dict:
     """Run the full resume tailor pipeline. MUST NOT raise."""
+    run_id = None
     try:
         from src.agents.orchestrator import run_pipeline
         async with get_connection() as conn:
@@ -95,6 +96,16 @@ async def resume_branch(state: dict) -> dict:
         )
     except Exception as exc:
         logger.error("Resume tailor branch failed for job %s: %s", state["job_id"], exc)
+        if run_id:
+            try:
+                async with get_connection() as conn:
+                    await conn.execute(
+                        "UPDATE ai_runs SET status = 'failed', error = ? WHERE id = ? AND status != 'completed'",
+                        (str(exc), run_id),
+                    )
+                    await conn.commit()
+            except Exception:
+                logger.error("Failed to mark run %s as failed", run_id)
     return {}
 
 
