@@ -217,6 +217,9 @@ def build_extraction_graph() -> StateGraph:
     return graph
 
 
+_compiled_extraction_graph = build_extraction_graph().compile()
+
+
 async def run_extraction_pipeline(raw_text: str, url: str) -> dict:
     initial_state: ExtractionState = {
         "raw_text": raw_text,
@@ -229,8 +232,7 @@ async def run_extraction_pipeline(raw_text: str, url: str) -> dict:
     }
 
     try:
-        compiled = build_extraction_graph().compile()
-        result = await compiled.ainvoke(initial_state)
+        result = await _compiled_extraction_graph.ainvoke(initial_state)
         return {"job_id": result.get("job_id"), "error": result.get("error")}
     except Exception as exc:
         logger.error("Pipeline exception: %s: %s", type(exc).__name__, exc)
