@@ -233,7 +233,7 @@ async def run_extraction_pipeline(raw_text: str, url: str) -> dict:
 
     try:
         result = await _compiled_extraction_graph.ainvoke(initial_state)
-        return {"job_id": result.get("job_id"), "error": result.get("error")}
+        return {"job_id": result.get("job_id"), "error": result.get("error"), "extracted": result.get("extracted")}
     except Exception as exc:
         logger.error("Pipeline exception: %s: %s", type(exc).__name__, exc)
-        return {"job_id": None, "error": str(exc)}
+        return {"job_id": None, "error": str(exc), "extracted": None}
