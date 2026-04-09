@@ -25,15 +25,13 @@ class SearchRequest(BaseModel):
 @router.post("/search")
 async def start_search(req: SearchRequest):
     # Validate job exists
-    conn = get_connection()
-    try:
-        row = conn.execute("SELECT id FROM jobs WHERE id = ?", (req.job_id,)).fetchone()
-    finally:
-        conn.close()
+    async with get_connection() as conn:
+        cursor = await conn.execute("SELECT id FROM jobs WHERE id = ?", (req.job_id,))
+        row = await cursor.fetchone()
     if not row:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    search_id = create_search(job_id=req.job_id)
+    search_id = await create_search(job_id=req.job_id)
     task = asyncio.create_task(run_linkedin_pipeline(search_id, req.job_id))
     _background_tasks.add(task)
     task.add_done_callback(_background_tasks.discard)
@@ -43,10 +41,10 @@ async def start_search(req: SearchRequest):
 @router.get("/job/{job_id}")
 async def get_latest_for_job(job_id: int):
     """Get the latest search for a job, if any."""
-    search = load_latest_search_for_job(job_id)
+    search = await load_latest_search_for_job(job_id)
     if not search:
         return {"search": None}
-    contacts = load_contacts(search["id"])
+    contacts = await load_contacts(search["id"])
     company = None
     if search.get("company_data_json") and search["company_data_json"] != "{}":
         company = {
@@ -69,11 +67,11 @@ async def get_latest_for_job(job_id: int):
 @router.get("/{search_id}")
 async def get_search(search_id: int):
     try:
-        search = load_search(search_id)
+        search = await load_search(search_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Search not found")
 
-    contacts = load_contacts(search_id)
+    contacts = await load_contacts(search_id)
     company = None
     if search.get("company_data_json") and search["company_data_json"] != "{}":
         company = {
@@ -97,8 +95,8 @@ async def get_search(search_id: int):
 @router.delete("/{search_id}")
 async def delete_search_endpoint(search_id: int):
     try:
-        load_search(search_id)
+        await load_search(search_id)
     except ValueError:
         raise HTTPException(status_code=404, detail="Search not found")
-    delete_search(search_id)
+    await delete_search(search_id)
     return {"ok": True}

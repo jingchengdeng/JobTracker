@@ -1,9 +1,9 @@
+import asyncio
 import sqlite3
-import time
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 
 import pytest
-from fastapi.testclient import TestClient
+from httpx import AsyncClient, ASGITransport
 
 from src.main import app
 from src.models.schemas import ClassifierOutput
@@ -32,6 +32,26 @@ def test_db(tmp_path, monkeypatch):
             id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, role TEXT,
             content TEXT, round_number INTEGER, created_at TEXT DEFAULT (datetime('now'))
         );
+        CREATE TABLE IF NOT EXISTS interview_sessions (
+            id INTEGER PRIMARY KEY, status TEXT, ended_at TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+        CREATE TABLE IF NOT EXISTS linkedin_searches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'running',
+            company_domain TEXT,
+            company_data_json TEXT,
+            company_summary TEXT,
+            started_at TEXT NOT NULL DEFAULT (datetime('now')),
+            completed_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS embedding_state (
+            id INTEGER PRIMARY KEY,
+            active_signature TEXT,
+            pending_signature TEXT,
+            updated_at TEXT
+        );
         INSERT INTO jobs (id, description) VALUES (1, 'jd');
         INSERT INTO resumes (id, extracted_text) VALUES (1, 'resume');
         INSERT INTO ai_runs (id, job_id, resume_id, status) VALUES (1, 1, 1, 'completed');
@@ -47,31 +67,29 @@ def test_db(tmp_path, monkeypatch):
     return db_path
 
 
-def _wait_for_background(mock_pipeline, timeout=2.0):
-    """Poll until the background thread has called run_pipeline (or timeout)."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if mock_pipeline.called:
-            return
-        time.sleep(0.05)
-
-
-def test_followup_saves_user_and_ack_with_same_round(test_db):
+@pytest.mark.asyncio
+async def test_followup_saves_user_and_ack_with_same_round(test_db):
     fake_classifier = ClassifierOutput(
         needs_jd_analysis=False, needs_gap_analysis=False,
         needs_suggestions=True, needs_rewrite=True,
         reasoning="x",
         response_message="Sure, I'll tighten the rewrite.",
     )
-    with patch("src.api.routes.classify_followup", return_value=fake_classifier), \
-         patch("src.api.routes.run_pipeline") as mock_pipeline, \
+    mock_classifier = AsyncMock(return_value=fake_classifier)
+    mock_pipeline = AsyncMock(return_value={})
+    mock_summarize = AsyncMock()
+
+    with patch("src.api.routes.classify_followup", mock_classifier), \
+         patch("src.api.routes.run_pipeline", mock_pipeline), \
          patch("src.api.routes.get_chat_model"), \
-         patch("src.api.routes.summarize_old_rounds"):
-        mock_pipeline.return_value = {}
-        client = TestClient(app)
-        resp = client.post("/api/runs/1/message", json={"content": "add leadership"})
-        assert resp.status_code == 200
-        _wait_for_background(mock_pipeline)
+         patch("src.api.routes.summarize_old_rounds", mock_summarize):
+        import src.api.routes as routes_mod
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post("/api/runs/1/message", json={"content": "add leadership"})
+            assert resp.status_code == 200
+            # Wait for all background tasks to complete
+            if routes_mod._background_tasks:
+                await asyncio.gather(*list(routes_mod._background_tasks), return_exceptions=True)
 
         conn = sqlite3.connect(test_db)
         msgs = conn.execute(
@@ -90,16 +108,23 @@ def test_followup_saves_user_and_ack_with_same_round(test_db):
         assert call_kwargs["needs_gap_analysis"] is False
 
 
-def test_followup_falls_back_when_classifier_fails(test_db):
-    with patch("src.api.routes.classify_followup", side_effect=Exception("boom")), \
-         patch("src.api.routes.run_pipeline") as mock_pipeline, \
+@pytest.mark.asyncio
+async def test_followup_falls_back_when_classifier_fails(test_db):
+    mock_classifier = AsyncMock(side_effect=Exception("boom"))
+    mock_pipeline = AsyncMock(return_value={})
+    mock_summarize = AsyncMock()
+
+    with patch("src.api.routes.classify_followup", mock_classifier), \
+         patch("src.api.routes.run_pipeline", mock_pipeline), \
          patch("src.api.routes.get_chat_model"), \
-         patch("src.api.routes.summarize_old_rounds"):
-        mock_pipeline.return_value = {}
-        client = TestClient(app)
-        resp = client.post("/api/runs/1/message", json={"content": "add leadership"})
-        assert resp.status_code == 200
-        _wait_for_background(mock_pipeline)
+         patch("src.api.routes.summarize_old_rounds", mock_summarize):
+        import src.api.routes as routes_mod
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            resp = await ac.post("/api/runs/1/message", json={"content": "add leadership"})
+            assert resp.status_code == 200
+            # Wait for all background tasks to complete
+            if routes_mod._background_tasks:
+                await asyncio.gather(*list(routes_mod._background_tasks), return_exceptions=True)
 
         conn = sqlite3.connect(test_db)
         msgs = conn.execute(
