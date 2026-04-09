@@ -65,7 +65,11 @@ Extract from this section:
 - salary_min, salary_max: parse from salary line if present
   - "$130K/yr - $170K/yr" → salary_min=130000, salary_max=170000
   - "$50/hr - $75/hr" → convert to annual (x2080): salary_min=104000, salary_max=156000
+  - "$99,000 - $232,000" → salary_min=99000, salary_max=232000
   - salary_currency: "USD" for "$"
+  - Salary may also appear in [field: description] as a range embedded in a
+    paragraph (e.g. "The salary range for this position is: $X - $Y").
+    If salary is absent from top_card, check the description for it.
 - work_mode: normalize to one of: "remote", "hybrid", "onsite"
 - job_type: normalize to one of: "full_time", "part_time", "contract", "internship"
 
