@@ -7,6 +7,8 @@ from urllib.parse import urlparse
 from fastapi import APIRouter
 from pydantic import BaseModel
 
+from src.agents.extraction_pipeline import run_extraction_pipeline
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/extension")
@@ -90,4 +92,19 @@ async def extract(req: ExtractRequest):
     filepath.write_text(content, encoding="utf-8")
 
     logger.info("Saved extraction to %s", filepath)
-    return {"success": True, "filename": filename}
+
+    # Run LLM extraction pipeline
+    job_id = None
+    extraction_error = None
+    try:
+        pipeline_result = run_extraction_pipeline(req.rawPanelText, req.url)
+        job_id = pipeline_result.get("job_id")
+        extraction_error = pipeline_result.get("error")
+    except Exception as exc:
+        logger.error("Extraction pipeline failed: %s", exc)
+        extraction_error = str(exc)
+
+    result = {"success": True, "filename": filename, "job_id": job_id}
+    if extraction_error:
+        result["extraction_error"] = extraction_error
+    return result

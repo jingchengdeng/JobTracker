@@ -1,4 +1,5 @@
 import os
+from unittest.mock import patch
 
 import pytest
 from fastapi import FastAPI
@@ -22,6 +23,13 @@ def client(extractions_dir, monkeypatch):
     return TestClient(app)
 
 
+RAW_EXTRACTION_PAYLOAD = {
+    "url": "https://www.linkedin.com/jobs/view/4369788254/",
+    "extracted": {},
+    "rawPanelText": "[field: company]\n[selector: test]\nKforce Inc\n\n---\n\n[field: description]\n[selector: test]\nAbout the job\n\nSome description here.",
+    "timestamp": "2026-04-09T01-25-31",
+}
+
 VALID_PAYLOAD = {
     "url": "https://www.linkedin.com/jobs/view/123456/",
     "extracted": {
@@ -37,9 +45,12 @@ VALID_PAYLOAD = {
     "timestamp": "2026-04-08T12-34-56",
 }
 
+_NOOP_PIPELINE = {"job_id": None, "error": None}
 
+
+@patch("src.api.extension_routes.run_extraction_pipeline", return_value=_NOOP_PIPELINE)
 class TestExtractEndpoint:
-    def test_saves_file_and_returns_filename(self, client, extractions_dir):
+    def test_saves_file_and_returns_filename(self, mock_pipeline, client, extractions_dir):
         resp = client.post("/api/extension/extract", json=VALID_PAYLOAD)
         assert resp.status_code == 200
         data = resp.json()
@@ -54,7 +65,7 @@ class TestExtractEndpoint:
         assert "Acme Corp" in content
         assert "Full raw text of the job panel goes here..." in content
 
-    def test_file_contains_all_sections(self, client, extractions_dir):
+    def test_file_contains_all_sections(self, mock_pipeline, client, extractions_dir):
         resp = client.post("/api/extension/extract", json=VALID_PAYLOAD)
         assert resp.status_code == 200
         files = list(extractions_dir.iterdir())
@@ -63,7 +74,7 @@ class TestExtractEndpoint:
         assert "=== EXTRACTED FIELDS ===" in content
         assert "=== RAW PANEL TEXT ===" in content
 
-    def test_missing_extracted_fields_still_saves(self, client, extractions_dir):
+    def test_missing_extracted_fields_still_saves(self, mock_pipeline, client, extractions_dir):
         payload = {
             "url": "https://www.linkedin.com/jobs/view/999/",
             "extracted": {},
@@ -77,7 +88,7 @@ class TestExtractEndpoint:
         files = list(extractions_dir.iterdir())
         assert len(files) == 1
 
-    def test_missing_url_returns_422(self, client):
+    def test_missing_url_returns_422(self, mock_pipeline, client):
         payload = {
             "extracted": {},
             "rawPanelText": "text",
@@ -86,7 +97,7 @@ class TestExtractEndpoint:
         resp = client.post("/api/extension/extract", json=payload)
         assert resp.status_code == 422
 
-    def test_missing_raw_panel_text_returns_422(self, client):
+    def test_missing_raw_panel_text_returns_422(self, mock_pipeline, client):
         payload = {
             "url": "https://www.linkedin.com/jobs/view/123/",
             "extracted": {},
@@ -95,7 +106,7 @@ class TestExtractEndpoint:
         resp = client.post("/api/extension/extract", json=payload)
         assert resp.status_code == 422
 
-    def test_long_description_is_truncated(self, client, extractions_dir):
+    def test_long_description_is_truncated(self, mock_pipeline, client, extractions_dir):
         long_desc = "A" * 250
         payload = {
             "url": "https://www.linkedin.com/jobs/view/777/",
@@ -113,3 +124,36 @@ class TestExtractEndpoint:
         content = files[0].read_text()
         assert "..." in content
         assert long_desc not in content
+
+    def test_pipeline_success_returns_job_id(self, mock_pipeline, client, extractions_dir):
+        mock_pipeline.return_value = {"job_id": 42, "error": None}
+        resp = client.post("/api/extension/extract", json=RAW_EXTRACTION_PAYLOAD)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["job_id"] == 42
+        assert data["filename"].endswith(".txt")
+        files = list(extractions_dir.iterdir())
+        assert len(files) == 1
+
+    def test_pipeline_failure_still_saves_txt(self, mock_pipeline, client, extractions_dir):
+        mock_pipeline.return_value = {"job_id": None, "error": "title is required"}
+        resp = client.post("/api/extension/extract", json=RAW_EXTRACTION_PAYLOAD)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["job_id"] is None
+        assert data["extraction_error"] == "title is required"
+        files = list(extractions_dir.iterdir())
+        assert len(files) == 1
+
+    def test_pipeline_exception_still_saves_txt(self, mock_pipeline, client, extractions_dir):
+        mock_pipeline.side_effect = Exception("LLM exploded")
+        resp = client.post("/api/extension/extract", json=RAW_EXTRACTION_PAYLOAD)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["success"] is True
+        assert data["job_id"] is None
+        assert "LLM exploded" in data["extraction_error"]
+        files = list(extractions_dir.iterdir())
+        assert len(files) == 1
