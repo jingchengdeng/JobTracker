@@ -4,7 +4,6 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from src.main import app
-from src.memory.embedding_state import ensure_row
 
 
 @pytest.fixture
@@ -26,11 +25,25 @@ def test_db(tmp_path, monkeypatch):
         "INSERT INTO resumes (name, file_path, file_type, extracted_text) "
         "VALUES ('A.pdf', 'p', 'pdf', 'alpha')"
     )
+    # Tables needed by lifespan startup recovery
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ai_runs (id INTEGER PRIMARY KEY, status TEXT, error TEXT)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ai_steps (id INTEGER PRIMARY KEY, round_number INTEGER DEFAULT 0)"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS interview_sessions (id INTEGER PRIMARY KEY, status TEXT, "
+        "ended_at TEXT, created_at TEXT DEFAULT (datetime('now')))"
+    )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS ai_messages (id INTEGER PRIMARY KEY)"
+    )
     conn.commit()
     conn.close()
     monkeypatch.setenv("JOBTRACKER_DB_PATH", db_path)
-    monkeypatch.setenv("VECTORDB_PATH", str(tmp_path / "vectordb"))
-    ensure_row()
+    monkeypatch.setenv("CHROMADB_HOST", "localhost")
+    monkeypatch.setenv("CHROMADB_PORT", "19999")
     return db_path
 
 
