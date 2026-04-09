@@ -7,6 +7,7 @@ export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const status = params.get("status");
   const source = params.get("source");
+  const url = params.get("url");
   const search = params.get("search");
   const sort = params.get("sort") || "createdAt";
   const order = params.get("order") || "desc";
@@ -16,6 +17,7 @@ export async function GET(request: NextRequest) {
   const conditions = [];
   if (status) conditions.push(eq(jobs.status, status as any));
   if (source) conditions.push(eq(jobs.source, source as any));
+  if (url) conditions.push(eq(jobs.url, url));
   if (search) {
     conditions.push(
       or(
