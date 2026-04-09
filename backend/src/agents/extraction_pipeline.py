@@ -1,6 +1,10 @@
+import logging
+
 import httpx
 from langchain_core.messages import SystemMessage, HumanMessage
 from langgraph.graph import StateGraph, END
+
+logger = logging.getLogger(__name__)
 
 from src.models.provider import get_linkedin_model
 from src.agents.extraction_schemas import (
@@ -151,7 +155,8 @@ def _should_retry(state: ExtractionState) -> str:
 
 def _handle_failure(state: ExtractionState) -> ExtractionState:
     errors = state.get("validation_errors", [])
-    error_msg = "Extraction failed validation: " + "; ".join(errors)
+    error_msg = "Extraction failed validation after retry: " + "; ".join(errors)
+    logger.warning(error_msg)
     return {**state, "error": error_msg}
 
 
@@ -175,8 +180,10 @@ def insert_job(state: ExtractionState) -> ExtractionState:
         response = httpx.post(NEXTJS_JOBS_URL, json=body)
         response.raise_for_status()
         data = response.json()
+        logger.info("Inserted job %s: %s at %s", data.get("id"), body["title"], body["company"])
         return {**state, "job_id": data.get("id")}
     except Exception as exc:
+        logger.error("Failed to insert job: %s", exc)
         return {**state, "error": f"Failed to insert job: {exc}"}
 
 
