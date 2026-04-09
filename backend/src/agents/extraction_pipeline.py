@@ -233,4 +233,5 @@ async def run_extraction_pipeline(raw_text: str, url: str) -> dict:
         result = await compiled.ainvoke(initial_state)
         return {"job_id": result.get("job_id"), "error": result.get("error")}
     except Exception as exc:
+        logger.error("Pipeline exception: %s: %s", type(exc).__name__, exc)
         return {"job_id": None, "error": str(exc)}
