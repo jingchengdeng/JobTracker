@@ -1,5 +1,4 @@
 import os
-from pathlib import Path
 
 import chromadb
 
@@ -8,36 +7,33 @@ from src.memory.embedding_state import get_active_signature
 from src.memory.signatures import collection_name_for
 from src.services.embeddings import embedding_function_for_signature
 
-VECTORDB_DIR = os.environ.get(
-    "VECTORDB_PATH",
-    str(Path(__file__).parent.parent.parent.parent / "data" / "vectordb"),
-)
+CHROMADB_HOST = os.environ.get("CHROMADB_HOST", "localhost")
+CHROMADB_PORT = int(os.environ.get("CHROMADB_PORT", "8200"))
 
 
-def _client():
-    # Re-read env each call so tests that monkeypatch VECTORDB_PATH work.
-    path = os.environ.get("VECTORDB_PATH", VECTORDB_DIR)
-    return chromadb.PersistentClient(path=path)
+async def _client():
+    return await chromadb.AsyncHttpClient(host=CHROMADB_HOST, port=CHROMADB_PORT)
 
 
-def active_collection():
+async def active_collection():
     """Return the Chroma collection serving queries, or None if none active."""
-    signature = get_active_signature()
+    signature = await get_active_signature()
     if signature is None:
         return None
     config = load_model_config()
     embedding = config["embedding"]
-    return collection_for_signature(
+    return await collection_for_signature(
         signature,
         provider=embedding["provider"],
         model=embedding["model"],
     )
 
 
-def collection_for_signature(signature: str, *, provider: str, model: str):
+async def collection_for_signature(signature: str, *, provider: str, model: str):
     """Get-or-create the Chroma collection for a specific signature."""
     ef = embedding_function_for_signature(signature, provider=provider, model=model)
-    return _client().get_or_create_collection(
+    client = await _client()
+    return await client.get_or_create_collection(
         name=collection_name_for(signature),
         embedding_function=ef,
     )

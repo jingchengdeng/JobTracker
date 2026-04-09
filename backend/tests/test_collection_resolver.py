@@ -1,6 +1,5 @@
-import sqlite3
 import pytest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.memory.collection_resolver import (
     active_collection,
@@ -11,6 +10,9 @@ from src.memory.embedding_state import set_active_signature, ensure_row
 
 @pytest.fixture
 def test_db(tmp_path):
+    """Create a temp SQLite DB with the embedding_state table."""
+    import sqlite3
+
     db_path = str(tmp_path / "test.db")
     conn = sqlite3.connect(db_path)
     conn.execute(
@@ -23,51 +25,75 @@ def test_db(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def mock_db_and_vectordb(test_db, tmp_path, monkeypatch):
-    monkeypatch.setenv("VECTORDB_PATH", str(tmp_path / "vectordb"))
+async def mock_db_and_chromadb(test_db, monkeypatch):
+    monkeypatch.setenv("JOBTRACKER_DB_PATH", test_db)
     fake_config = {
         "embedding": {"provider": "sentence_transformer", "model": "all-MiniLM-L6-v2"}
     }
-    def make_conn():
-        conn = sqlite3.connect(test_db)
-        conn.row_factory = sqlite3.Row
-        return conn
-    monkeypatch.setattr("src.memory.embedding_state.get_connection", make_conn)
-    with patch("src.memory.collection_resolver.load_model_config", return_value=fake_config):
-        ensure_row()
+    with patch(
+        "src.memory.collection_resolver.load_model_config",
+        return_value=fake_config,
+    ):
+        await ensure_row()
         yield
 
 
-def test_active_collection_returns_none_when_no_active_signature():
-    assert active_collection() is None
+def _make_mock_chromadb(collection_name="resume_chunks__sentence_transformer__all_minilm_l6_v2"):
+    """Build a mock chromadb module with AsyncHttpClient returning a fake client."""
+    mock_collection = MagicMock()
+    mock_collection.name = collection_name
+
+    mock_client = AsyncMock()
+    mock_client.get_or_create_collection = AsyncMock(return_value=mock_collection)
+
+    mock_chromadb = MagicMock()
+    mock_chromadb.AsyncHttpClient = AsyncMock(return_value=mock_client)
+    return mock_chromadb, mock_collection
 
 
-def test_collection_for_signature_creates_collection():
-    col = collection_for_signature(
-        "sentence_transformer__all_minilm_l6_v2",
-        provider="sentence_transformer",
-        model="all-MiniLM-L6-v2",
-    )
+@pytest.mark.asyncio
+async def test_active_collection_returns_none_when_no_active_signature():
+    mock_chromadb, _ = _make_mock_chromadb()
+    with patch("src.memory.collection_resolver.chromadb", mock_chromadb):
+        result = await active_collection()
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_collection_for_signature_creates_collection():
+    mock_chromadb, mock_collection = _make_mock_chromadb()
+    with patch("src.memory.collection_resolver.chromadb", mock_chromadb):
+        col = await collection_for_signature(
+            "sentence_transformer__all_minilm_l6_v2",
+            provider="sentence_transformer",
+            model="all-MiniLM-L6-v2",
+        )
     assert col is not None
     assert col.name == "resume_chunks__sentence_transformer__all_minilm_l6_v2"
 
 
-def test_active_collection_returns_collection_for_active_signature():
-    set_active_signature("sentence_transformer__all_minilm_l6_v2")
-    col = active_collection()
+@pytest.mark.asyncio
+async def test_active_collection_returns_collection_for_active_signature():
+    await set_active_signature("sentence_transformer__all_minilm_l6_v2")
+    mock_chromadb, mock_collection = _make_mock_chromadb()
+    with patch("src.memory.collection_resolver.chromadb", mock_chromadb):
+        col = await active_collection()
     assert col is not None
     assert col.name == "resume_chunks__sentence_transformer__all_minilm_l6_v2"
 
 
-def test_collection_for_signature_is_idempotent():
-    col1 = collection_for_signature(
-        "sentence_transformer__all_minilm_l6_v2",
-        provider="sentence_transformer",
-        model="all-MiniLM-L6-v2",
-    )
-    col2 = collection_for_signature(
-        "sentence_transformer__all_minilm_l6_v2",
-        provider="sentence_transformer",
-        model="all-MiniLM-L6-v2",
-    )
+@pytest.mark.asyncio
+async def test_collection_for_signature_is_idempotent():
+    mock_chromadb, mock_collection = _make_mock_chromadb()
+    with patch("src.memory.collection_resolver.chromadb", mock_chromadb):
+        col1 = await collection_for_signature(
+            "sentence_transformer__all_minilm_l6_v2",
+            provider="sentence_transformer",
+            model="all-MiniLM-L6-v2",
+        )
+        col2 = await collection_for_signature(
+            "sentence_transformer__all_minilm_l6_v2",
+            provider="sentence_transformer",
+            model="all-MiniLM-L6-v2",
+        )
     assert col1.name == col2.name
