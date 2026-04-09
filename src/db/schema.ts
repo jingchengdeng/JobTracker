@@ -66,6 +66,7 @@ export const resumes = sqliteTable("resumes", {
   lastIndexSignature: text("last_index_signature"),
   lastIndexStatus: text("last_index_status", { enum: ["ok", "failed", "pending"] }),
   lastIndexError: text("last_index_error"),
+  isDefault: integer("is_default").notNull().default(0),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
