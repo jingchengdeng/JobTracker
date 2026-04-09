@@ -14,6 +14,7 @@ from src.agents.linkedin_schemas import (
     JdAnalysis, RelevanceScores, ConnectionNotes, CompanySummary, LeadershipReview,
 )
 from src.agents.linkedin_search import brave_search_profiles, brave_search_domain, SEARCH_DELAY_SECONDS
+from src.db import get_connection
 from src.models.provider import get_linkedin_model
 from src.auth.credentials import load_api_key
 
@@ -99,9 +100,9 @@ def truncate_note(note: str) -> str:
 
 # --- LLM nodes ---
 
-def run_analyze_jd(job: dict) -> dict:
+async def run_analyze_jd(job: dict) -> dict:
     """Analyze the JD to extract role info. Returns dict matching JdAnalysis fields."""
-    llm = get_linkedin_model()
+    llm = await asyncio.to_thread(get_linkedin_model)
     structured = llm.with_structured_output(JdAnalysis, method="function_calling")
     description = job.get("description") or ""
     title = job.get("title") or ""
@@ -112,16 +113,16 @@ def run_analyze_jd(job: dict) -> dict:
         "Extract the role title, department domain, seniority level, "
         "leadership titles one level above this role, and relevant department keywords."
     )
-    result = structured.invoke([HumanMessage(content=prompt)])
+    result = await structured.ainvoke([HumanMessage(content=prompt)])
     return result.model_dump()
 
 
-def run_extract_domain(job: dict) -> str | None:
+async def run_extract_domain(job: dict) -> str | None:
     """Try to extract a company domain from the JD text."""
     description = job.get("description") or ""
     if not description.strip():
         return None
-    llm = get_linkedin_model()
+    llm = await asyncio.to_thread(get_linkedin_model)
     prompt = (
         "Extract the company's website domain from this job description. "
         "Look for URLs, email addresses, or explicit mentions of the company website. "
@@ -129,7 +130,7 @@ def run_extract_domain(job: dict) -> str | None:
         "Do not guess — only return a domain if you find explicit evidence.\n\n"
         f"Job description:\n{description[:3000]}"
     )
-    response = llm.invoke([HumanMessage(content=prompt)])
+    response = await llm.ainvoke([HumanMessage(content=prompt)])
     raw = response.content
     if isinstance(raw, list):
         raw = "".join(block.get("text", "") if isinstance(block, dict) else str(block) for block in raw)
@@ -143,11 +144,11 @@ def run_extract_domain(job: dict) -> str | None:
     return text.rstrip("/") if "." in text else None
 
 
-def run_score_relevance(people: list[dict], job: dict, analysis: dict | None) -> list[dict]:
+async def run_score_relevance(people: list[dict], job: dict, analysis: dict | None) -> list[dict]:
     """Score each person for relevance to the job."""
     if not people:
         return []
-    llm = get_linkedin_model()
+    llm = await asyncio.to_thread(get_linkedin_model)
     structured = llm.with_structured_output(RelevanceScores, method="function_calling")
     people_text = "\n".join(
         f"- {p['name']} | {p['title']} | {p['location'] or 'Unknown'} | {p['linkedin_url']}"
@@ -169,18 +170,18 @@ def run_score_relevance(people: list[dict], job: dict, analysis: dict | None) ->
         "unrelated departments, very junior roles, people who may have left the company.\n\n"
         f"People to score:\n{people_text}"
     )
-    result = structured.invoke([HumanMessage(content=prompt)])
+    result = await structured.ainvoke([HumanMessage(content=prompt)])
     score_map = {s.linkedin_url: s.score for s in result.scores}
     for person in people:
         person["relevance_score"] = score_map.get(person["linkedin_url"], 50)
     return people
 
 
-def run_generate_notes(people: list[dict], job: dict) -> list[dict]:
+async def run_generate_notes(people: list[dict], job: dict) -> list[dict]:
     """Generate personalized connection notes for each person."""
     if not people:
         return []
-    llm = get_linkedin_model()
+    llm = await asyncio.to_thread(get_linkedin_model)
     structured = llm.with_structured_output(ConnectionNotes, method="function_calling")
     people_text = "\n".join(
         f"- {p['name']} ({p['title']}) | {p['linkedin_url']}" for p in people
@@ -192,7 +193,7 @@ def run_generate_notes(people: list[dict], job: dict) -> list[dict]:
         f"and specific to the person's role. Mention the job title and company.\n\n"
         f"People:\n{people_text}"
     )
-    result = structured.invoke([HumanMessage(content=prompt)])
+    result = await structured.ainvoke([HumanMessage(content=prompt)])
     note_map = {n.linkedin_url: n.note for n in result.notes}
     for person in people:
         raw_note = note_map.get(person["linkedin_url"], f"Hi {person['name']}, I'm interested in the {job.get('title', '')} role at {job['company']}.")
@@ -200,9 +201,9 @@ def run_generate_notes(people: list[dict], job: dict) -> list[dict]:
     return people
 
 
-def run_compile_summary(company_data: dict, job: dict) -> str:
+async def run_compile_summary(company_data: dict, job: dict) -> str:
     """Generate an interview-prep company summary from Apollo data."""
-    llm = get_linkedin_model()
+    llm = await asyncio.to_thread(get_linkedin_model)
     structured = llm.with_structured_output(CompanySummary, method="function_calling")
     # Pick the most relevant fields
     fields = {
@@ -225,15 +226,15 @@ def run_compile_summary(company_data: dict, job: dict) -> str:
         "Focus on: what the company does, scale and financial health, relevant tech stack, "
         "department size if available, and any insights useful for interview prep."
     )
-    result = structured.invoke([HumanMessage(content=prompt)])
+    result = await structured.ainvoke([HumanMessage(content=prompt)])
     return result.summary
 
 
-def run_review_leadership(people: list[dict], role_domain: str) -> LeadershipReview:
+async def run_review_leadership(people: list[dict], role_domain: str) -> LeadershipReview:
     """Review leadership search results for relevance to the role domain."""
     if not people:
         return LeadershipReview(relevant_count=0, total_count=0, needs_retry=False, refined_query=None)
-    llm = get_linkedin_model()
+    llm = await asyncio.to_thread(get_linkedin_model)
     structured = llm.with_structured_output(LeadershipReview, method="function_calling")
     people_text = "\n".join(f"- {p['name']} | {p['title']}" for p in people)
     prompt = (
@@ -244,7 +245,7 @@ def run_review_leadership(people: list[dict], role_domain: str) -> LeadershipRev
         f"If more than 50% are irrelevant, set needs_retry=true and suggest a refined "
         f"search query that adds '{role_domain}' to narrow results."
     )
-    return structured.invoke([HumanMessage(content=prompt)])
+    return await structured.ainvoke([HumanMessage(content=prompt)])
 
 
 # --- Apollo integration ---
@@ -306,18 +307,14 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
     Uses Brave Search API when key is configured (no browser needed).
     Falls back to headed Google via Xvfb if no Brave key, or headless as last resort.
     """
-    from src.db import get_connection
-
-    conn = get_connection()
-    try:
-        row = conn.execute(
+    async with get_connection() as conn:
+        cursor = await conn.execute(
             "SELECT id, title, company, description FROM jobs WHERE id = ?", (job_id,)
-        ).fetchone()
-    finally:
-        conn.close()
+        )
+        row = await cursor.fetchone()
 
     if not row:
-        update_search_status(search_id, "failed")
+        await update_search_status(search_id, "failed")
         return
 
     job = dict(row)
@@ -331,12 +328,12 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
         # 2. Analyze JD (if full mode)
         analysis = None
         if mode == "full":
-            analysis = await loop.run_in_executor(None, run_analyze_jd, job)
+            analysis = await run_analyze_jd(job)
 
         # 3. Extract domain from JD text
         domain = None
         if job.get("description"):
-            domain = await loop.run_in_executor(None, run_extract_domain, job)
+            domain = await run_extract_domain(job)
         logger.info("Domain from JD extraction: %s", domain)
 
         # 4. Check for Brave API key
@@ -397,9 +394,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
 
         # 8. Review leadership results (if applicable)
         if "leadership" in search_results and analysis and search_results["leadership"]:
-            review = await loop.run_in_executor(
-                None, run_review_leadership, search_results["leadership"], analysis["role_domain"]
-            )
+            review = await run_review_leadership(search_results["leadership"], analysis["role_domain"])
             if review.needs_retry and review.refined_query:
                 retry_query = f'site:linkedin.com/in "{review.refined_query}" "{job["company"]}"'
                 if brave_key:
@@ -419,32 +414,32 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
 
         # 10. Score relevance
         if merged:
-            merged = await loop.run_in_executor(None, run_score_relevance, merged, job, analysis)
+            merged = await run_score_relevance(merged, job, analysis)
 
         # 11. Filter and rank
         ranked = filter_and_rank(merged)
 
         # 12. Generate connection notes
         if ranked:
-            ranked = await loop.run_in_executor(None, run_generate_notes, ranked, job)
+            ranked = await run_generate_notes(ranked, job)
 
         # 13. Compile company summary
         summary = None
         if company_data:
-            summary = await loop.run_in_executor(None, run_compile_summary, company_data, job)
+            summary = await run_compile_summary(company_data, job)
 
         # 14. Save results
         if company_data or domain:
-            save_company_data(
+            await save_company_data(
                 search_id,
                 domain=domain or "",
                 data_json=json.dumps(company_data) if company_data else "{}",
                 summary=summary or "",
             )
 
-        save_contacts(search_id, ranked)
-        update_search_status(search_id, "completed")
+        await save_contacts(search_id, ranked)
+        await update_search_status(search_id, "completed")
 
     except Exception as exc:
         logger.exception("LinkedIn pipeline failed for search %s: %s", search_id, exc)
-        update_search_status(search_id, "failed")
+        await update_search_status(search_id, "failed")
