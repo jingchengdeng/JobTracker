@@ -1,18 +1,42 @@
-import sqlite3
 import os
+import sqlite3
+from contextlib import asynccontextmanager
 from pathlib import Path
+
+import aiosqlite
 
 
 def get_db_path() -> str:
-    """Return path to the shared SQLite database."""
     return os.environ.get(
         "JOBTRACKER_DB_PATH",
-        str(Path(__file__).parent.parent.parent / "jobtracker.db"),
+        str(Path(__file__).parent.parent.parent / "data" / "jobtracker.db"),
     )
 
 
-def get_connection() -> sqlite3.Connection:
-    """Open a connection to the shared SQLite database with WAL mode."""
+@asynccontextmanager
+async def get_connection():
+    """Async context manager returning an aiosqlite connection.
+
+    Usage:
+        async with get_connection() as conn:
+            cursor = await conn.execute("SELECT ...")
+            row = await cursor.fetchone()
+    """
+    conn = await aiosqlite.connect(get_db_path())
+    conn.row_factory = aiosqlite.Row
+    await conn.execute("PRAGMA journal_mode=WAL")
+    await conn.execute("PRAGMA busy_timeout=5000")
+    try:
+        yield conn
+    finally:
+        await conn.close()
+
+
+def get_sync_connection() -> sqlite3.Connection:
+    """Sync connection for startup-only use (before event loop serves requests).
+
+    Caller is responsible for closing.
+    """
     conn = sqlite3.connect(get_db_path())
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
