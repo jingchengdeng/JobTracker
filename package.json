@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"next dev --turbopack\" \"cd backend && uv run uvicorn src.main:app --reload --port 8000\"",
+    "dev": "concurrently \"next dev --turbopack\" \"cd backend && uv run uvicorn src.main:app --reload --port 8000\" \"cd backend && uv run chroma run --path ../data/vectordb --port 8200\"",
     "dev:web": "next dev --turbopack",
     "dev:backend": "cd backend && uv run uvicorn src.main:app --reload --port 8000",
     "build": "next build",
