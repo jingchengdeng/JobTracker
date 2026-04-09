@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter
 from pydantic import BaseModel
 
@@ -16,6 +17,8 @@ router = APIRouter(prefix="/api/extension")
 DEFAULT_EXTRACTIONS_DIR = os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "data", "extractions"
 )
+
+NEXTJS_JOBS_URL = "http://localhost:3000/api/jobs"
 
 
 class ExtractedFields(BaseModel):
@@ -92,6 +95,27 @@ async def extract(req: ExtractRequest):
     filepath.write_text(content, encoding="utf-8")
 
     logger.info("Saved extraction to %s", filepath)
+
+    # Check for duplicate by URL
+    if req.url and req.url.strip():
+        try:
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(
+                    NEXTJS_JOBS_URL, params={"url": req.url}
+                )
+                resp.raise_for_status()
+                existing_jobs = resp.json()
+            if existing_jobs:
+                logger.info("Duplicate detected for URL: %s", req.url)
+                return {
+                    "success": True,
+                    "filename": filename,
+                    "duplicate": True,
+                    "existing_job_id": existing_jobs[0]["id"],
+                    "message": "Already saved",
+                }
+        except Exception as exc:
+            logger.warning("Duplicate check failed, proceeding with pipeline: %s", exc)
 
     # Run LLM extraction pipeline
     job_id = None

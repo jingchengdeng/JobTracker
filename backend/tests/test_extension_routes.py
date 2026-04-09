@@ -1,5 +1,5 @@
 import os
-from unittest.mock import patch, AsyncMock
+from unittest.mock import patch, AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -157,3 +157,42 @@ class TestExtractEndpoint:
         assert "LLM exploded" in data["extraction_error"]
         files = list(extractions_dir.iterdir())
         assert len(files) == 1
+
+    def test_duplicate_url_skips_pipeline(self, mock_pipeline, client, extractions_dir):
+        with patch("src.api.extension_routes.httpx.AsyncClient") as mock_client_cls:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = [{"id": 42, "title": "Existing Job"}]
+            mock_resp.raise_for_status.return_value = None
+
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            resp = client.post("/api/extension/extract", json=VALID_PAYLOAD)
+            assert resp.status_code == 200
+            data = resp.json()
+            assert data["duplicate"] is True
+            assert data["existing_job_id"] == 42
+            assert data["message"] == "Already saved"
+            assert data["filename"].endswith(".txt")
+            mock_pipeline.assert_not_called()
+
+    def test_no_duplicate_runs_pipeline(self, mock_pipeline, client, extractions_dir):
+        with patch("src.api.extension_routes.httpx.AsyncClient") as mock_client_cls:
+            mock_resp = MagicMock()
+            mock_resp.json.return_value = []
+            mock_resp.raise_for_status.return_value = None
+
+            mock_client = AsyncMock()
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=False)
+            mock_client_cls.return_value = mock_client
+
+            resp = client.post("/api/extension/extract", json=VALID_PAYLOAD)
+            assert resp.status_code == 200
+            data = resp.json()
+            assert "duplicate" not in data
+            mock_pipeline.assert_called_once()
