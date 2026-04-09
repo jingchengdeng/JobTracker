@@ -32,7 +32,7 @@ async def interview_ws_handler(websocket: WebSocket, session_id: int):
 
     # Validate session
     try:
-        session = load_session(session_id)
+        session = await load_session(session_id)
     except ValueError:
         await websocket.send_json({"type": "error", "code": "session_not_found", "message": "Session not found"})
         await websocket.close()
@@ -47,7 +47,7 @@ async def interview_ws_handler(websocket: WebSocket, session_id: int):
         return
 
     state = ConnectionState(session_id=session_id)
-    turns = load_turns(session_id)
+    turns = await load_turns(session_id)
 
     await websocket.send_json({
         "type": "connected",
@@ -127,7 +127,7 @@ async def _handle_audio(websocket: WebSocket, state: ConnectionState, audio_byte
         return
 
     # Turn limit
-    turns = load_turns(state.session_id)
+    turns = await load_turns(state.session_id)
     if len(turns) >= MAX_TURNS_PER_SESSION:
         await websocket.send_json({"type": "error", "code": "turn_limit", "message": "Maximum turns reached"})
         return
@@ -175,7 +175,7 @@ async def _handle_text_input(websocket: WebSocket, state: ConnectionState, text:
         await websocket.send_json({"type": "error", "code": "busy", "message": "Still processing"})
         return
 
-    turns = load_turns(state.session_id)
+    turns = await load_turns(state.session_id)
     if len(turns) >= MAX_TURNS_PER_SESSION:
         await websocket.send_json({"type": "error", "code": "turn_limit", "message": "Maximum turns reached"})
         return
@@ -188,9 +188,8 @@ async def _handle_text_input(websocket: WebSocket, state: ConnectionState, text:
     try:
         from src.agents.interview_engine import process_interview_turn
 
-        loop = asyncio.get_event_loop()
         turn_response = await asyncio.wait_for(
-            loop.run_in_executor(None, lambda: process_interview_turn(state.session_id, text)),
+            process_interview_turn(state.session_id, text),
             timeout=30.0,
         )
 

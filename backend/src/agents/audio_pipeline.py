@@ -61,10 +61,9 @@ async def process_audio_turn(session_id: int, audio_bytes: bytes, voice: str) ->
             interviewer_message="I didn't quite catch that. Could you repeat your answer?",
         ), "I didn't quite catch that. Could you repeat your answer?"
 
-    # 2. Turn function in thread executor
-    loop = asyncio.get_event_loop()
+    # 2. Turn function (now async)
     turn_response = await asyncio.wait_for(
-        loop.run_in_executor(None, lambda: process_interview_turn(session_id, transcript)),
+        process_interview_turn(session_id, transcript),
         timeout=30.0,
     )
 

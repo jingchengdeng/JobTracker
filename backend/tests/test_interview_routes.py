@@ -1,6 +1,6 @@
 import sqlite3
 import json
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock
 import pytest
 from fastapi.testclient import TestClient
 
@@ -22,7 +22,7 @@ def client(test_db):
 
 
 class TestStartInterview:
-    @patch("src.api.interview_routes.run_planning")
+    @patch("src.api.interview_routes.run_planning", new_callable=AsyncMock)
     @patch("src.api.interview_routes.load_credential")
     def test_start_creates_session(self, mock_cred, mock_plan, client):
         mock_cred.return_value = {"type": "api_key", "key": "fake"}
@@ -50,8 +50,8 @@ class TestStartInterview:
 
 
 class TestEndInterview:
-    @patch("src.api.interview_routes.run_scoring")
-    @patch("src.api.interview_routes.run_planning")
+    @patch("src.api.interview_routes.run_scoring", new_callable=AsyncMock)
+    @patch("src.api.interview_routes.run_planning", new_callable=AsyncMock)
     @patch("src.api.interview_routes.load_credential")
     def test_end_triggers_scoring(self, mock_cred, mock_plan, mock_score, client):
         mock_cred.return_value = {"type": "api_key", "key": "fake"}
@@ -70,7 +70,7 @@ class TestEndInterview:
 
 
 class TestListSessions:
-    @patch("src.api.interview_routes.run_planning")
+    @patch("src.api.interview_routes.run_planning", new_callable=AsyncMock)
     @patch("src.api.interview_routes.load_credential")
     def test_list_returns_sessions_for_job(self, mock_cred, mock_plan, client):
         mock_cred.return_value = {"type": "api_key", "key": "fake"}
@@ -86,7 +86,7 @@ class TestListSessions:
 
 
 class TestGetSession:
-    @patch("src.api.interview_routes.run_planning")
+    @patch("src.api.interview_routes.run_planning", new_callable=AsyncMock)
     @patch("src.api.interview_routes.load_credential")
     def test_get_returns_session_detail(self, mock_cred, mock_plan, client):
         mock_cred.return_value = {"type": "api_key", "key": "fake"}
@@ -105,10 +105,10 @@ class TestGetSession:
 
 
 class TestDeleteSession:
-    def test_delete_removes_session(self, client, test_db):
+    async def test_delete_removes_session(self, client, test_db):
         from src.agents.interview_db import create_session, load_session
 
-        session_id = create_session(
+        session_id = await create_session(
             job_id=1, resume_id=1, interview_type="technical",
             difficulty="medium", duration_minutes=30, voice="nova",
         )
@@ -117,7 +117,7 @@ class TestDeleteSession:
         assert resp.json() == {"ok": True}
 
         with pytest.raises(ValueError):
-            load_session(session_id)
+            await load_session(session_id)
 
     def test_delete_nonexistent_returns_ok(self, client, test_db):
         resp = client.delete("/api/interview/99999")
