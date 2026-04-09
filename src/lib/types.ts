@@ -125,6 +125,7 @@ export interface Resume {
   lastIndexSignature: string | null;
   lastIndexStatus: IndexStatus | null;
   lastIndexError: string | null;
+  isDefault: number;
   createdAt: string;
 }
 
