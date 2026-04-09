@@ -9,7 +9,7 @@ import aiosqlite
 def get_db_path() -> str:
     return os.environ.get(
         "JOBTRACKER_DB_PATH",
-        str(Path(__file__).parent.parent.parent / "data" / "jobtracker.db"),
+        str(Path(__file__).parent.parent.parent / "jobtracker.db"),
     )
 
 
