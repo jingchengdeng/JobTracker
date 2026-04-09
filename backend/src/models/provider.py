@@ -120,6 +120,10 @@ def _create_chat_model(provider_id: str, model: str) -> BaseChatModel:
                 event_hooks={"request": [_codex_rewrite_request]},
                 timeout=httpx.Timeout(60.0, connect=10.0),
             )
+            kwargs["http_async_client"] = httpx.AsyncClient(
+                event_hooks={"request": [_codex_rewrite_request]},
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            )
         return ChatOpenAI(**kwargs)
 
     if provider["client"] == "anthropic":
