@@ -109,18 +109,16 @@ def _is_excluded_domain(root: str) -> bool:
 _BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 
 
-def brave_search_profiles(query: str, api_key: str, max_results: int = 15) -> list[dict]:
-    """Search Brave for LinkedIn profiles. Returns parsed person records.
-
-    Synchronous — call via run_in_executor from async code.
-    """
+async def brave_search_profiles(query: str, api_key: str, max_results: int = 15) -> list[dict]:
+    """Search Brave for LinkedIn profiles. Returns parsed person records."""
     try:
-        resp = httpx.get(
-            _BRAVE_ENDPOINT,
-            params={"q": query, "count": max_results},
-            headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
-            timeout=15.0,
-        )
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                _BRAVE_ENDPOINT,
+                params={"q": query, "count": max_results},
+                headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
+                timeout=15.0,
+            )
         if resp.status_code != 200:
             logger.warning("Brave API returned %s for '%s'", resp.status_code, query[:80])
             return []
@@ -172,19 +170,19 @@ def brave_search_profiles(query: str, api_key: str, max_results: int = 15) -> li
     return results
 
 
-def brave_search_domain(company: str, api_key: str) -> str | None:
+async def brave_search_domain(company: str, api_key: str) -> str | None:
     """Search Brave for a company's website domain.
 
-    Synchronous — call via run_in_executor from async code.
     Returns root domain (e.g., 'deloitte.com' not 'resources.deloitte.com').
     """
     try:
-        resp = httpx.get(
-            _BRAVE_ENDPOINT,
-            params={"q": f'"{company}" official website', "count": 5},
-            headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
-            timeout=15.0,
-        )
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                _BRAVE_ENDPOINT,
+                params={"q": f'"{company}" official website', "count": 5},
+                headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
+                timeout=15.0,
+            )
         if resp.status_code != 200:
             logger.warning("Brave domain search returned %s for '%s'", resp.status_code, company)
             return None

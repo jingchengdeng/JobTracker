@@ -318,7 +318,6 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
         return
 
     job = dict(row)
-    loop = asyncio.get_running_loop()
 
     try:
         # 1. Precondition check
@@ -341,7 +340,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
 
         # 5. Domain search fallback (if JD extraction found nothing)
         if not domain and brave_key:
-            domain = await loop.run_in_executor(None, brave_search_domain, job["company"], brave_key)
+            domain = await brave_search_domain(job["company"], brave_key)
             logger.info("Domain from Brave search: %s", domain)
 
         # 6. Apollo enrichment (if domain found + key configured)
@@ -357,9 +356,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
         if brave_key:
             # Brave API path (no browser needed)
             for q in queries:
-                results = await loop.run_in_executor(
-                    None, brave_search_profiles, q["query"], brave_key, 15
-                )
+                results = await brave_search_profiles(q["query"], brave_key, 15)
                 search_results[q["tag"]] = results
                 logger.info("Brave search '%s': %d results", q["tag"], len(results))
                 await asyncio.sleep(SEARCH_DELAY_SECONDS)
@@ -398,9 +395,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
             if review.needs_retry and review.refined_query:
                 retry_query = f'site:linkedin.com/in "{review.refined_query}" "{job["company"]}"'
                 if brave_key:
-                    retry_results = await loop.run_in_executor(
-                        None, brave_search_profiles, retry_query, brave_key
-                    )
+                    retry_results = await brave_search_profiles(retry_query, brave_key)
                 else:
                     logger.warning("Leadership retry skipped — no Brave key, browser already closed")
                     retry_results = []
