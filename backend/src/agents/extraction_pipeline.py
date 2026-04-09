@@ -109,7 +109,7 @@ GENERAL RULES:
 - Do not invent or infer data that is not present in the raw text."""
 
 
-def extract_fields(state: ExtractionState) -> ExtractionState:
+async def extract_fields(state: ExtractionState) -> ExtractionState:
     llm = get_linkedin_model()
     structured_llm = llm.with_structured_output(LinkedInJobExtraction, method="function_calling")
 
@@ -130,7 +130,7 @@ def extract_fields(state: ExtractionState) -> ExtractionState:
         human_content = raw_text
         retry_count = state.get("retry_count", 0)
 
-    result = structured_llm.invoke([
+    result = await structured_llm.ainvoke([
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=human_content),
     ])
@@ -164,7 +164,7 @@ def _handle_failure(state: ExtractionState) -> ExtractionState:
     return {**state, "error": error_msg}
 
 
-def insert_job(state: ExtractionState) -> ExtractionState:
+async def insert_job(state: ExtractionState) -> ExtractionState:
     extracted = state.get("extracted") or {}
     body = {
         "title": extracted.get("title"),
@@ -181,9 +181,10 @@ def insert_job(state: ExtractionState) -> ExtractionState:
     }
 
     try:
-        response = httpx.post(NEXTJS_JOBS_URL, json=body)
-        response.raise_for_status()
-        data = response.json()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(NEXTJS_JOBS_URL, json=body)
+            response.raise_for_status()
+            data = response.json()
         logger.info("Inserted job %s: %s at %s", data.get("id"), body["title"], body["company"])
         return {**state, "job_id": data.get("id")}
     except Exception as exc:
@@ -216,7 +217,7 @@ def build_extraction_graph() -> StateGraph:
     return graph
 
 
-def run_extraction_pipeline(raw_text: str, url: str) -> dict:
+async def run_extraction_pipeline(raw_text: str, url: str) -> dict:
     initial_state: ExtractionState = {
         "raw_text": raw_text,
         "url": url,
@@ -229,7 +230,7 @@ def run_extraction_pipeline(raw_text: str, url: str) -> dict:
 
     try:
         compiled = build_extraction_graph().compile()
-        result = compiled.invoke(initial_state)
+        result = await compiled.ainvoke(initial_state)
         return {"job_id": result.get("job_id"), "error": result.get("error")}
     except Exception as exc:
         return {"job_id": None, "error": str(exc)}
