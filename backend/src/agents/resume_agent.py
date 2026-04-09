@@ -1,3 +1,5 @@
+import asyncio
+
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from src.models.provider import get_chat_model
@@ -25,9 +27,9 @@ def build_system_prompt(preferences: list[str], conversation_summary: str | None
     return "\n".join(parts)
 
 
-def step_jd_analysis(state: dict) -> dict:
+async def step_jd_analysis(state: dict) -> dict:
     """Analyze the job description and extract structured requirements."""
-    llm = get_chat_model()
+    llm = await asyncio.to_thread(get_chat_model)
     structured_llm = llm.with_structured_output(JdAnalysis, method="function_calling")
 
     prompt = (
@@ -36,28 +38,28 @@ def step_jd_analysis(state: dict) -> dict:
         f"Job Description:\n{state['jd_text']}"
     )
 
-    preferences = load_all_preferences()
+    preferences = await load_all_preferences()
     system = build_system_prompt(preferences, state.get("conversation_summary"))
 
-    result = structured_llm.invoke([
+    result = await structured_llm.ainvoke([
         SystemMessage(content=system),
         HumanMessage(content=prompt),
     ])
 
-    return {**state, "jd_analysis": result.model_dump_json()}
+    return {**state, "jd_analysis": result.model_dump_json(), "preferences": preferences}
 
 
-def step_rag_retrieval(state: dict) -> dict:
+async def step_rag_retrieval(state: dict) -> dict:
     """Retrieve relevant experience from the resume corpus using RAG."""
     jd_analysis = JdAnalysis.model_validate_json(state["jd_analysis"])
 
     all_chunks = []
     for req in jd_analysis.key_requirements[:5]:
-        chunks = query_resume_corpus(req, n_results=3)
+        chunks = await query_resume_corpus(req, n_results=3)
         all_chunks.extend(chunks)
 
     for tech in jd_analysis.technologies[:5]:
-        chunks = query_resume_corpus(tech, n_results=2)
+        chunks = await query_resume_corpus(tech, n_results=2)
         all_chunks.extend(chunks)
 
     seen = set()
@@ -75,9 +77,9 @@ def step_rag_retrieval(state: dict) -> dict:
     return {**state, "rag_chunks": rag_context}
 
 
-def step_gap_analysis(state: dict) -> dict:
+async def step_gap_analysis(state: dict) -> dict:
     """Compare JD requirements against the resume and RAG-retrieved experience."""
-    llm = get_chat_model()
+    llm = await asyncio.to_thread(get_chat_model)
     structured_llm = llm.with_structured_output(GapAnalysis, method="function_calling")
 
     rag_section = ""
@@ -96,10 +98,13 @@ def step_gap_analysis(state: dict) -> dict:
         f"{rag_section}"
     )
 
-    preferences = load_all_preferences()
+    if state.get("preferences") is not None:
+        preferences = state["preferences"]
+    else:
+        preferences = await load_all_preferences()
     system = build_system_prompt(preferences, state.get("conversation_summary"))
 
-    result = structured_llm.invoke([
+    result = await structured_llm.ainvoke([
         SystemMessage(content=system),
         HumanMessage(content=prompt),
     ])
@@ -107,9 +112,9 @@ def step_gap_analysis(state: dict) -> dict:
     return {**state, "gap_analysis": result.model_dump_json()}
 
 
-def step_suggestions(state: dict) -> dict:
+async def step_suggestions(state: dict) -> dict:
     """Generate section-by-section rewrite suggestions."""
-    llm = get_chat_model()
+    llm = await asyncio.to_thread(get_chat_model)
     structured_llm = llm.with_structured_output(Suggestions, method="function_calling")
 
     recent_messages = state.get("recent_messages", [])
@@ -127,10 +132,13 @@ def step_suggestions(state: dict) -> dict:
         f"{chat_context}"
     )
 
-    preferences = load_all_preferences()
+    if state.get("preferences") is not None:
+        preferences = state["preferences"]
+    else:
+        preferences = await load_all_preferences()
     system = build_system_prompt(preferences, state.get("conversation_summary"))
 
-    result = structured_llm.invoke([
+    result = await structured_llm.ainvoke([
         SystemMessage(content=system),
         HumanMessage(content=prompt),
     ])
@@ -138,9 +146,9 @@ def step_suggestions(state: dict) -> dict:
     return {**state, "suggestions": result.model_dump_json()}
 
 
-def step_rewrite(state: dict) -> dict:
+async def step_rewrite(state: dict) -> dict:
     """Generate the full rewritten resume."""
-    llm = get_chat_model()
+    llm = await asyncio.to_thread(get_chat_model)
     structured_llm = llm.with_structured_output(RewriteResult, method="function_calling")
 
     recent_messages = state.get("recent_messages", [])
@@ -158,10 +166,13 @@ def step_rewrite(state: dict) -> dict:
         f"{chat_context}"
     )
 
-    preferences = load_all_preferences()
+    if state.get("preferences") is not None:
+        preferences = state["preferences"]
+    else:
+        preferences = await load_all_preferences()
     system = build_system_prompt(preferences, state.get("conversation_summary"))
 
-    result = structured_llm.invoke([
+    result = await structured_llm.ainvoke([
         SystemMessage(content=system),
         HumanMessage(content=prompt),
     ])
