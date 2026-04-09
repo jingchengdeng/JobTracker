@@ -1,4 +1,11 @@
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === "GET_BACKEND_URL") {
+    chrome.storage.local.get("backendUrl", (result) => {
+      sendResponse(result.backendUrl || "http://localhost:3000");
+    });
+    return true;
+  }
+
   if (msg.type !== "SAVE_EXTRACTION") return;
 
   const { backendUrl, payload } = msg;
