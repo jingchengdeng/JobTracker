@@ -2,7 +2,7 @@ import asyncio
 import time
 import sqlite3
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 
 from src.memory.reindex import (
     start_reindex_job,
@@ -35,16 +35,10 @@ def test_db(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def mock_db(test_db, monkeypatch):
-    def make_conn():
-        conn = sqlite3.connect(test_db)
-        conn.row_factory = sqlite3.Row
-        return conn
-    monkeypatch.setattr("src.memory.embedding_state.get_connection", make_conn)
-    monkeypatch.setattr("src.memory.reindex.get_connection", make_conn)
-    monkeypatch.setattr("src.memory.rag.get_connection", make_conn)
+async def mock_db(test_db, monkeypatch):
+    monkeypatch.setenv("JOBTRACKER_DB_PATH", test_db)
     _jobs.clear()
-    ensure_row()
+    await ensure_row()
     yield
     _jobs.clear()
 
@@ -64,7 +58,7 @@ def seed_resumes(test_db):
 
 @pytest.fixture
 def mock_collection_for_signature():
-    with patch("src.memory.reindex.collection_for_signature") as m:
+    with patch("src.memory.reindex.collection_for_signature", new_callable=AsyncMock) as m:
         m.return_value = MagicMock(name="fake_collection")
         yield m
 
@@ -87,7 +81,7 @@ async def test_full_reindex_partial_failure_does_not_flip_pointer(
     assert job.status == "completed"
     assert len(job.succeeded) == 2
     assert len(job.failed) == 1
-    assert get_active_signature() is None
+    assert await get_active_signature() is None
 
 
 async def test_full_reindex_no_failures_flips_pointer(
@@ -113,7 +107,7 @@ async def test_full_reindex_no_failures_flips_pointer(
     assert job.status == "completed"
     assert len(job.succeeded) == 3
     assert len(job.failed) == 0
-    assert get_active_signature() == "openai__model_x"
+    assert await get_active_signature() == "openai__model_x"
 
 
 async def test_per_resume_subset_does_not_flip_pointer(
@@ -129,7 +123,7 @@ async def test_per_resume_subset_does_not_flip_pointer(
             resume_ids=[1],
         )
         await get_job(job_id).task
-    assert get_active_signature() is None
+    assert await get_active_signature() is None
 
 
 async def test_second_concurrent_job_rejected(
@@ -176,7 +170,7 @@ async def test_retry_after_failures_flips_pointer_when_all_converged(
             resume_ids=None,
         )
         await get_job(job_id).task
-        assert get_active_signature() is None
+        assert await get_active_signature() is None
 
     def ok(collection, rid, name, text):
         return None
@@ -188,4 +182,4 @@ async def test_retry_after_failures_flips_pointer_when_all_converged(
             resume_ids=[2],
         )
         await get_job(retry_id).task
-        assert get_active_signature() == "sig_target"
+        assert await get_active_signature() == "sig_target"

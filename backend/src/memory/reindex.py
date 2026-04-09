@@ -89,7 +89,7 @@ async def _run_job(
     resume_ids: Optional[list[int]],
 ) -> None:
     try:
-        collection = collection_for_signature(
+        collection = await collection_for_signature(
             job.target_signature, provider=provider, model=model
         )
     except Exception as exc:
@@ -99,13 +99,13 @@ async def _run_job(
         job.failed.append({"resume_id": None, "error": str(exc)})
         return
 
-    resumes = _fetch_resumes(resume_ids)
+    resumes = await _fetch_resumes(resume_ids)
     job.total = len(resumes)
 
     for r in resumes:
         job.current_resume_id = r["id"]
         if not r["extracted_text"]:
-            mark_resume_failed(r["id"], "No extracted text on file")
+            await mark_resume_failed(r["id"], "No extracted text on file")
             job.failed.append({"resume_id": r["id"], "error": "No extracted text on file"})
             continue
         try:
@@ -114,61 +114,57 @@ async def _run_job(
                     index_resume_into, collection, r["id"], r["name"], r["extracted_text"]
                 )
             await with_retry(op, retries=3, backoff=(1.0, 2.0, 4.0))
-            mark_resume_ok(r["id"], job.target_signature)
+            await mark_resume_ok(r["id"], job.target_signature)
             job.succeeded.append(r["id"])
         except Exception as exc:
             logger.warning("Resume %s reindex failed: %s", r["id"], exc)
-            mark_resume_failed(r["id"], str(exc))
+            await mark_resume_failed(r["id"], str(exc))
             job.failed.append({"resume_id": r["id"], "error": str(exc)})
 
     job.current_resume_id = None
     job.status = "completed"
     job.completed_at = _now_iso()
 
-    _maybe_flip_pointer(
+    await _maybe_flip_pointer(
         job.target_signature,
         was_full=resume_ids is None,
         had_failures=bool(job.failed),
     )
 
 
-def _maybe_flip_pointer(target_signature: str, *, was_full: bool, had_failures: bool) -> None:
+async def _maybe_flip_pointer(target_signature: str, *, was_full: bool, had_failures: bool) -> None:
     if was_full and not had_failures:
         logger.info("Flipping active_signature to %s (clean full reindex)", target_signature)
-        set_active_signature(target_signature)
+        await set_active_signature(target_signature)
         return
     # Post-retry hook: if every resume is now at target_signature with ok status, flip
-    conn = get_connection()
-    try:
-        row = conn.execute(
+    async with get_connection() as conn:
+        cursor = await conn.execute(
             "SELECT COUNT(*) AS total, "
             "SUM(CASE WHEN last_index_signature = ? AND last_index_status = 'ok' THEN 1 ELSE 0 END) AS ok_count "
             "FROM resumes",
             (target_signature,),
-        ).fetchone()
-    finally:
-        conn.close()
+        )
+        row = await cursor.fetchone()
     if row["total"] > 0 and row["ok_count"] == row["total"]:
         logger.info("Flipping active_signature to %s (post-retry convergence)", target_signature)
-        set_active_signature(target_signature)
+        await set_active_signature(target_signature)
 
 
-def _fetch_resumes(resume_ids: Optional[list[int]]) -> list[dict]:
-    conn = get_connection()
-    try:
+async def _fetch_resumes(resume_ids: Optional[list[int]]) -> list[dict]:
+    async with get_connection() as conn:
         if resume_ids is None:
-            rows = conn.execute(
+            cursor = await conn.execute(
                 "SELECT id, name, extracted_text FROM resumes ORDER BY id"
-            ).fetchall()
+            )
         else:
             placeholders = ",".join("?" * len(resume_ids))
-            rows = conn.execute(
+            cursor = await conn.execute(
                 f"SELECT id, name, extracted_text FROM resumes WHERE id IN ({placeholders}) ORDER BY id",
                 tuple(resume_ids),
-            ).fetchall()
+            )
+        rows = await cursor.fetchall()
         return [dict(r) for r in rows]
-    finally:
-        conn.close()
 
 
 def _now_iso() -> str:
