@@ -54,6 +54,9 @@ backend/__pycache__/
 
 # local data (resumes, vector db, auth tokens)
 data/
+!data/extractions/
+data/extractions/*
+!data/extractions/.gitkeep
 
 # design docs
 docs/superpowers/

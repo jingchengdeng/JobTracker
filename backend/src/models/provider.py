@@ -36,6 +36,11 @@ _APP_ORIGINATOR = "jobtracker"
 _APP_VERSION = "0.1.0"
 
 
+async def _async_codex_rewrite_request(request: httpx.Request) -> None:
+    """Async wrapper for _codex_rewrite_request (httpx.AsyncClient requires async hooks)."""
+    _codex_rewrite_request(request)
+
+
 def _codex_rewrite_request(request: httpx.Request) -> None:
     """Rewrite outgoing request body to match chatgpt.com/backend-api/codex.
 
@@ -118,6 +123,10 @@ def _create_chat_model(provider_id: str, model: str) -> BaseChatModel:
             kwargs["store"] = False
             kwargs["http_client"] = httpx.Client(
                 event_hooks={"request": [_codex_rewrite_request]},
+                timeout=httpx.Timeout(60.0, connect=10.0),
+            )
+            kwargs["http_async_client"] = httpx.AsyncClient(
+                event_hooks={"request": [_async_codex_rewrite_request]},
                 timeout=httpx.Timeout(60.0, connect=10.0),
             )
         return ChatOpenAI(**kwargs)

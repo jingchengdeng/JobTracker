@@ -40,6 +40,16 @@ Practice for real interviews with an AI interviewer that adapts to the job descr
 
 Requires an OpenAI key (for speech-to-text and text-to-speech) and an LLM key for the interviewer model.
 
+### Chrome Extension
+
+Save jobs directly from LinkedIn with one click.
+
+- **One-click save** — a floating "Save to JobTracker" button appears on LinkedIn job detail pages. Click it and the raw page content is sent to the backend, where an LLM extracts structured fields (title, company, location, salary, job type, work mode) and inserts the job into your database.
+- **Duplicate detection** — if the job URL already exists in your database, the extension shows "Already saved" and skips the extraction pipeline entirely.
+- **SPA-aware** — detects LinkedIn's client-side navigation so the button works as you browse between job listings without refreshing.
+
+To install: open `chrome://extensions`, enable Developer Mode, click "Load unpacked", and select the `chrome-extension/` folder. The extension defaults to `http://localhost:3000` — change the backend URL in the extension popup if needed.
+
 ### LinkedIn Search
 
 Open the AI workspace from any job and switch to the LinkedIn Search tab.
