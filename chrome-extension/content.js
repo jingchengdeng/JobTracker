@@ -108,7 +108,9 @@
         throw new Error(resp?.error || "Background script error");
       }
 
-      if (resp.data.job_id) {
+      if (resp.data.duplicate) {
+        setButtonState("success", "Already saved");
+      } else if (resp.data.job_id) {
         setButtonState("success", "Saved to DB!");
       } else if (resp.data.extraction_error) {
         setButtonState("success", "Text saved (parse failed)");
