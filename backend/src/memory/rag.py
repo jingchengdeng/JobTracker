@@ -23,7 +23,7 @@ async def index_resume(resume_id: int, resume_name: str, extracted_text: str):
         return
     active_sig = await get_active_signature()
     try:
-        await asyncio.to_thread(index_resume_into, col, resume_id, resume_name, extracted_text)
+        await index_resume_into(col, resume_id, resume_name, extracted_text)
     except Exception as exc:
         await mark_resume_failed(resume_id, str(exc))
         raise
@@ -51,12 +51,12 @@ async def mark_resume_failed(resume_id: int, error: str) -> None:
         await conn.commit()
 
 
-def index_resume_into(collection, resume_id: int, resume_name: str, extracted_text: str):
-    """Index a resume into a specific Chroma collection. Stays sync -- called via to_thread."""
+async def index_resume_into(collection, resume_id: int, resume_name: str, extracted_text: str):
+    """Index a resume into a specific Chroma collection."""
     try:
-        existing = collection.get(where={"resume_id": resume_id})
+        existing = await collection.get(where={"resume_id": resume_id})
         if existing["ids"]:
-            collection.delete(ids=existing["ids"])
+            await collection.delete(ids=existing["ids"])
     except Exception:
         pass
 
@@ -79,7 +79,7 @@ def index_resume_into(collection, resume_id: int, resume_name: str, extracted_te
             "raw_text": chunk["text"],
         })
 
-    collection.add(ids=ids, documents=documents, metadatas=metadatas)
+    await collection.add(ids=ids, documents=documents, metadatas=metadatas)
 
 
 async def delete_resume_chunks(resume_id: int) -> int:
@@ -87,10 +87,10 @@ async def delete_resume_chunks(resume_id: int) -> int:
     col = await active_collection()
     if col is None:
         return 0
-    existing = await asyncio.to_thread(col.get, where={"resume_id": resume_id})
+    existing = await col.get(where={"resume_id": resume_id})
     ids = existing["ids"] if existing else []
     if ids:
-        await asyncio.to_thread(col.delete, ids=ids)
+        await col.delete(ids=ids)
     return len(ids)
 
 
@@ -101,9 +101,7 @@ async def query_resume_corpus(query: str, n_results: int = 10, filters: dict | N
         return []
 
     where = filters if filters else None
-    results = await asyncio.to_thread(
-        col.query, query_texts=[query], n_results=n_results, where=where
-    )
+    results = await col.query(query_texts=[query], n_results=n_results, where=where)
 
     chunks = []
     if results and results["documents"]:
@@ -233,7 +231,7 @@ async def reconcile_resume_index_state() -> None:
 
     try:
         col = await client.get_collection(name=active_name)
-        result = await asyncio.to_thread(col.get, include=["metadatas"])
+        result = await col.get(include=["metadatas"])
     except Exception as exc:
         logger.warning("reconcile: could not read active collection: %s", exc)
         return

@@ -111,24 +111,27 @@ async def lifespan(app: FastAPI):
         from src.memory.embedding_state import ensure_row
         from src.memory.legacy_migration import migrate_legacy_collection
         await ensure_row()
-        await migrate_legacy_collection()
+        await asyncio.wait_for(migrate_legacy_collection(), timeout=10)
     except Exception as exc:
         logger.warning("Legacy embedding migration skipped: %s", exc)
 
     try:
         from src.memory.rag import reconcile_resume_index_state
-        await reconcile_resume_index_state()
+        await asyncio.wait_for(reconcile_resume_index_state(), timeout=10)
     except Exception as exc:
         logger.warning("Resume index reconciliation skipped: %s", exc)
 
-    # ChromaDB health check with retry
+    # ChromaDB health check with retry and timeout
     import chromadb
     for attempt in range(3):
         try:
             chroma_host = os.environ.get("CHROMADB_HOST", "localhost")
             chroma_port = int(os.environ.get("CHROMADB_PORT", "8200"))
-            client = await chromadb.AsyncHttpClient(host=chroma_host, port=chroma_port)
-            await client.heartbeat()
+            client = await asyncio.wait_for(
+                chromadb.AsyncHttpClient(host=chroma_host, port=chroma_port),
+                timeout=5,
+            )
+            await asyncio.wait_for(client.heartbeat(), timeout=5)
             logger.info("ChromaDB server connected at %s:%s", chroma_host, chroma_port)
             break
         except Exception as exc:

@@ -85,7 +85,7 @@ def _mock_client(collection_names=None, collection_metadatas=None):
     client.list_collections.return_value = mock_collections
 
     def _get_collection(name):
-        col = MagicMock()
+        col = AsyncMock()
         col.name = name
         metas = collection_metadatas.get(name, [])
         col.get.return_value = {"ids": [f"id-{i}" for i in range(len(metas))], "metadatas": metas}

@@ -110,9 +110,7 @@ async def _run_job(
             continue
         try:
             async def op():
-                await asyncio.to_thread(
-                    index_resume_into, collection, r["id"], r["name"], r["extracted_text"]
-                )
+                await index_resume_into(collection, r["id"], r["name"], r["extracted_text"])
             await with_retry(op, retries=3, backoff=(1.0, 2.0, 4.0))
             await mark_resume_ok(r["id"], job.target_signature)
             job.succeeded.append(r["id"])
