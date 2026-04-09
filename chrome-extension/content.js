@@ -108,15 +108,24 @@
         throw new Error(resp?.error || "Background script error");
       }
 
-      setButtonState("success", "Saved!");
-      console.log("[JobTracker] Saved:", resp.data.filename);
+      if (resp.data.job_id) {
+        setButtonState("success", "Saved to DB!");
+      } else if (resp.data.extraction_error) {
+        setButtonState("success", "Text saved (parse failed)");
+        console.warn("[JobTracker] Extraction error:", resp.data.extraction_error);
+      } else {
+        setButtonState("success", "Saved!");
+      }
+      console.log("[JobTracker] Result:", resp.data);
       setTimeout(() => setButtonState(null, "Save to JobTracker"), 3000);
     } catch (err) {
       console.error("[JobTracker] Error:", err);
-      const msg =
-        err.message === "Failed to fetch" || err.message.includes("Failed to fetch")
-          ? "Cannot reach backend"
-          : "Save failed";
+      let msg = "Save failed";
+      if (err.message?.includes("Extension context invalidated")) {
+        msg = "Refresh page to reconnect";
+      } else if (err.message === "Failed to fetch" || err.message?.includes("Failed to fetch")) {
+        msg = "Cannot reach backend";
+      }
       setButtonState("error", msg);
       setTimeout(() => setButtonState(null, "Save to JobTracker"), 3000);
     }
