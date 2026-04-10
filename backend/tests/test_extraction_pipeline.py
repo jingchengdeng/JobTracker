@@ -80,20 +80,20 @@ class TestExtractFieldsNode:
 
 
 class TestValidateFieldsNode:
-    def test_valid_extraction_passes(self):
+    async def test_valid_extraction_passes(self):
         from src.agents.extraction_pipeline import validate_fields
 
         state = _make_state(extracted=_make_valid_extraction())
-        result = validate_fields(state)
+        result = await validate_fields(state)
 
         assert result["validation_errors"] == []
 
-    def test_invalid_extraction_returns_errors(self):
+    async def test_invalid_extraction_returns_errors(self):
         from src.agents.extraction_pipeline import validate_fields
 
         bad_data = _make_valid_extraction(salary_min=200000, salary_max=150000)
         state = _make_state(extracted=bad_data)
-        result = validate_fields(state)
+        result = await validate_fields(state)
 
         assert len(result["validation_errors"]) > 0
         assert any("salary_min" in e for e in result["validation_errors"])

@@ -143,14 +143,14 @@ async def extract_fields(state: ExtractionState) -> ExtractionState:
     }
 
 
-def validate_fields(state: ExtractionState) -> ExtractionState:
+async def validate_fields(state: ExtractionState) -> ExtractionState:
     extracted = state.get("extracted") or {}
     data = LinkedInJobExtraction.model_construct(**extracted)
     errors = validate_extraction(data)
     return {**state, "validation_errors": errors}
 
 
-def _should_retry(state: ExtractionState) -> str:
+async def _should_retry(state: ExtractionState) -> str:
     if not state.get("validation_errors"):
         return "insert_job"
     if state.get("retry_count", 0) < 1:
@@ -158,7 +158,7 @@ def _should_retry(state: ExtractionState) -> str:
     return "fail"
 
 
-def _handle_failure(state: ExtractionState) -> ExtractionState:
+async def _handle_failure(state: ExtractionState) -> ExtractionState:
     errors = state.get("validation_errors", [])
     error_msg = "Extraction failed validation after retry: " + "; ".join(errors)
     logger.warning(error_msg)
