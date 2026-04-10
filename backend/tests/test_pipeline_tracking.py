@@ -314,10 +314,11 @@ async def test_track_node_version_on_rerun_inserts_new_row_with_bumped_version(m
         conn.row_factory = aiosqlite.Row
         cursor = await conn.execute(
             "SELECT version FROM pipeline_events WHERE workflow_run_id='run-6' "
-            "AND node_name='refine_node' ORDER BY id DESC LIMIT 1"
+            "AND node_name='refine_node' ORDER BY id"
         )
-        row = await cursor.fetchone()
-    assert row["version"] == 2, "VERSION_ON_RERUN should bump version to 2"
+        rows = await cursor.fetchall()
+    assert len(rows) == 2, "VERSION_ON_RERUN should INSERT a new row, not UPDATE"
+    assert rows[-1]["version"] == 2, "VERSION_ON_RERUN should bump version to 2"
 
 
 @pytest.mark.asyncio
