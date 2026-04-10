@@ -260,3 +260,82 @@ async def test_track_node_treats_none_return_as_success(migrated_db):
         )
         row = await cursor.fetchone()
     assert row["status"] == "completed"
+
+
+@pytest.mark.asyncio
+async def test_track_node_retry_in_place_bumps_attempt_on_reentry(migrated_db):
+    from src.agents.pipeline_tracking import track_node, TrackBehavior
+    import aiosqlite
+
+    @track_node("master", "retry_node", TrackBehavior.RETRY_IN_PLACE)
+    async def node(state):
+        return {"result": "ok"}
+
+    state = {"workflow_run_id": "run-5", "job_id": None}
+    await node(state)
+    await node(state)  # re-entry
+
+    async with aiosqlite.connect(migrated_db) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute(
+            "SELECT COUNT(*) as n, MAX(attempt) as max_attempt "
+            "FROM pipeline_events WHERE workflow_run_id=? AND node_name=?",
+            ("run-5", "retry_node"),
+        )
+        row = await cursor.fetchone()
+    assert row["n"] == 1, "RETRY_IN_PLACE should UPDATE, not INSERT a new row"
+    assert row["max_attempt"] == 2
+
+
+@pytest.mark.asyncio
+async def test_track_node_version_on_rerun_inserts_new_row_with_bumped_version(migrated_db):
+    from src.agents.pipeline_tracking import track_node, TrackBehavior
+    import aiosqlite
+
+    @track_node("resume", "refine_node", TrackBehavior.VERSION_ON_RERUN)
+    async def node(state):
+        return {"result": "ok"}
+
+    state = {"workflow_run_id": "run-6", "job_id": None, "run_id": 42}
+
+    # Seed ai_runs row so the FK on run_id is satisfied.
+    async with aiosqlite.connect(migrated_db) as conn:
+        await conn.execute("INSERT INTO ai_runs (id, job_id, resume_id) VALUES (42, NULL, NULL)")
+        await conn.commit()
+
+    # First invocation inserts version=1 and completes it.
+    await node(state)
+
+    # Second invocation: _pre_hook finds the completed version=1 row for run-6,
+    # queries MAX(version) for run_id=42, and inserts a new row with version=2.
+    await node(state)
+
+    async with aiosqlite.connect(migrated_db) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute(
+            "SELECT version FROM pipeline_events WHERE workflow_run_id='run-6' "
+            "AND node_name='refine_node' ORDER BY id DESC LIMIT 1"
+        )
+        row = await cursor.fetchone()
+    assert row["version"] == 2, "VERSION_ON_RERUN should bump version to 2"
+
+
+@pytest.mark.asyncio
+async def test_track_node_synthesises_fallback_workflow_run_id(migrated_db, caplog):
+    from src.agents.pipeline_tracking import track_node, TrackBehavior
+    import aiosqlite
+    import logging
+
+    @track_node("master", "fallback_node", TrackBehavior.SINGLE_SHOT)
+    async def node(state):
+        return {}
+
+    with caplog.at_level(logging.WARNING, logger="src.agents.pipeline_tracking"):
+        await node({"job_id": None})  # no workflow_run_id
+
+    async with aiosqlite.connect(migrated_db) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute("SELECT workflow_run_id FROM pipeline_events")
+        row = await cursor.fetchone()
+    assert row["workflow_run_id"].startswith("fallback-")
+    assert any("missing workflow_run_id" in r.message for r in caplog.records)
