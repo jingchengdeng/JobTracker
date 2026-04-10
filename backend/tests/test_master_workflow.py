@@ -27,11 +27,17 @@ def _create_tables(db_path: str) -> None:
             resume_id INTEGER,
             status TEXT
         );
-        CREATE TABLE IF NOT EXISTS ai_steps (
+        CREATE TABLE IF NOT EXISTS pipeline_events (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workflow_run_id TEXT,
+            graph TEXT,
+            node_name TEXT,
+            status TEXT,
+            attempt INTEGER DEFAULT 1,
+            version INTEGER DEFAULT 1,
+            round_number INTEGER DEFAULT 0,
             run_id INTEGER,
-            step_name TEXT,
-            status TEXT
+            step_type TEXT
         );
         CREATE TABLE IF NOT EXISTS linkedin_searches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
