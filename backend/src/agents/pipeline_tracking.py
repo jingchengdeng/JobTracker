@@ -3,6 +3,12 @@
 Module-level singleton bus is intentional. Single uvicorn worker is assumed;
 multi-worker deployments would need a cross-process broker (Redis pub/sub)
 which is out of scope for v1.
+
+Thread-safety note: ``PipelineEventBus`` is intentionally lock-free. It relies
+on the cooperative single-threaded asyncio event loop — all mutations to
+``_subscribers`` happen without any ``await`` in between, so they cannot
+interleave. If you ever move to a multi-threaded executor or multiple workers,
+replace this bus with an external broker (e.g. Redis pub/sub).
 """
 import asyncio
 import logging
@@ -33,7 +39,7 @@ class PipelineEvent:
     version: int = 1
 
 
-@dataclass
+@dataclass(eq=False)
 class _Subscriber:
     queue: deque = field(default_factory=lambda: deque(maxlen=MAX_QUEUE))
     wake: asyncio.Event = field(default_factory=asyncio.Event)
@@ -45,11 +51,14 @@ def _detach_subscriber(
     job_id: int,
     sub: _Subscriber,
 ) -> None:
-    """Remove *sub* from the global registry. Runs synchronously (no await)."""
+    """Remove *sub* from the global registry. Runs synchronously (no await).
+
+    Uses identity comparison (``is``) rather than ``__eq__`` so that the
+    correct object is always removed even if equality semantics change.
+    """
     lst = subscribers.get(job_id, [])
-    if sub in lst:
-        lst.remove(sub)
-    if not lst:
+    subscribers[job_id] = [s for s in lst if s is not sub]
+    if not subscribers[job_id]:
         subscribers.pop(job_id, None)
 
 
@@ -63,6 +72,9 @@ class _SubscriberStream:
     coroutine frame returns.  This guarantees that
     ``bus._subscribers[job_id]`` is empty by the time the consuming task
     completes, even without an explicit ``aclose()`` call.
+
+    Callers may also invoke ``aclose()`` explicitly for deterministic cleanup
+    (e.g. on PyPy or when GC is disabled). The weakref remains as a safety net.
     """
 
     def __init__(
@@ -72,8 +84,10 @@ class _SubscriberStream:
         sub: _Subscriber,
     ) -> None:
         self._sub = sub
+        self._job_id = job_id
+        self._subscribers = subscribers
         # weakref.finalize holds only weak refs so it won't keep self alive
-        weakref.finalize(self, _detach_subscriber, subscribers, job_id, sub)
+        self._finalizer = weakref.finalize(self, _detach_subscriber, subscribers, job_id, sub)
 
     def __aiter__(self) -> "AsyncIterator[PipelineEvent]":
         return self  # type: ignore[return-value]
@@ -91,6 +105,16 @@ class _SubscriberStream:
                 return sub.queue.popleft()
             await sub.wake.wait()
 
+    async def aclose(self) -> None:
+        """Detach this subscriber immediately, without waiting for GC.
+
+        Safe to call multiple times. After the first call, the weakref
+        finalizer is also disarmed to avoid a redundant second detach.
+        """
+        if self._finalizer.alive:
+            self._finalizer.detach()
+            _detach_subscriber(self._subscribers, self._job_id, self._sub)
+
 
 class PipelineEventBus:
     """In-process asyncio pub/sub keyed by job_id.
@@ -105,21 +129,20 @@ class PipelineEventBus:
 
     def __init__(self) -> None:
         self._subscribers: dict[int, list[_Subscriber]] = {}
-        self._lock = asyncio.Lock()
 
     def subscribe(self, job_id: int) -> _SubscriberStream:
         """Register a new subscriber for *job_id* and return an async iterator.
 
         The subscriber is deregistered automatically when the returned stream
-        object is garbage-collected (e.g. when the ``async for`` loop exits).
+        object is garbage-collected (e.g. when the ``async for`` loop exits),
+        or when ``aclose()`` is called explicitly.
         """
         sub = _Subscriber()
         self._subscribers.setdefault(job_id, []).append(sub)
         return _SubscriberStream(self._subscribers, job_id, sub)
 
     async def publish(self, event: PipelineEvent) -> None:
-        async with self._lock:
-            subs = list(self._subscribers.get(event.job_id, []))
+        subs = list(self._subscribers.get(event.job_id, []))
         for sub in subs:
             self._enqueue(sub, event)
 
@@ -148,10 +171,9 @@ class PipelineEventBus:
             sub.wake.set()
 
     async def close_subscriber(self, job_id: int) -> None:
-        async with self._lock:
-            for sub in self._subscribers.get(job_id, []):
-                sub.closed = True
-                sub.wake.set()
+        for sub in self._subscribers.get(job_id, []):
+            sub.closed = True
+            sub.wake.set()
 
 
 # Module-level singleton. Single-worker deployment is assumed.

@@ -53,6 +53,9 @@ async def test_bus_drops_oldest_non_failed_on_overflow_preserves_failure():
     assert len(sub.queue) == MAX_QUEUE
     statuses = [e.status for e in sub.queue]
     assert "failed" in statuses
+    assert sub.queue[-1].status == "failed"
+    assert all(e.node_name != "n0" for e in sub.queue)
+    assert len([e for e in sub.queue if e.status == "failed"]) == 1
 
 
 @pytest.mark.asyncio
@@ -99,3 +102,14 @@ async def test_subscriber_detaches_cleanly_on_iterator_close():
     await asyncio.wait_for(consumer, timeout=1.0)
 
     assert 7 not in bus._subscribers or not bus._subscribers[7]
+
+
+@pytest.mark.asyncio
+async def test_subscriber_aclose_detaches_immediately():
+    from src.agents.pipeline_tracking import PipelineEventBus
+
+    bus = PipelineEventBus()
+    stream = bus.subscribe(job_id=99)
+    assert 99 in bus._subscribers
+    await stream.aclose()
+    assert 99 not in bus._subscribers or not bus._subscribers[99]
