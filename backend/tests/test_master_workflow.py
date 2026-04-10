@@ -209,6 +209,9 @@ class TestFanOut:
         assert resume_send.arg["resume_id"] == 7
         assert resume_send.arg["resume_text"] == "My resume text."
         assert resume_send.arg["resume_name"] == "Dev Resume"
+        assert resume_send.arg["workflow_run_id"] == "test-run-id"
+        linkedin_send = next(s for s in sends if s.node == "linkedin_branch")
+        assert linkedin_send.arg["workflow_run_id"] == "test-run-id"
 
     async def test_returns_only_linkedin_when_resume_text_is_none(self):
         from langgraph.types import Send
