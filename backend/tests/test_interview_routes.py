@@ -116,7 +116,8 @@ class TestDeleteSession:
         assert resp.status_code == 200
         assert resp.json() == {"ok": True}
 
-        with pytest.raises(ValueError):
+        from fastapi import HTTPException
+        with pytest.raises(HTTPException):
             await load_session(session_id)
 
     def test_delete_nonexistent_returns_ok(self, client, test_db):

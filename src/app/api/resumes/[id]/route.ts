@@ -30,13 +30,8 @@ export async function DELETE(
     return NextResponse.json({ error: "Resume not found" }, { status: 404 });
   }
 
-  // Delete the file from disk
-  const filePath = path.join(process.cwd(), resume.filePath);
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
-  }
-
   const resumeId = Number(id);
+  const filePath = path.join(process.cwd(), resume.filePath);
 
   // Drop vector chunks from the Python RAG store. Non-fatal: if the backend is
   // down we'd rather finish the DB cleanup than leave a half-deleted resume.
@@ -66,6 +61,11 @@ export async function DELETE(
 
     tx.delete(resumes).where(eq(resumes.id, resumeId)).run();
   });
+
+  // Delete file after DB transaction succeeds
+  if (fs.existsSync(filePath)) {
+    fs.unlinkSync(filePath);
+  }
 
   return NextResponse.json({ success: true });
 }

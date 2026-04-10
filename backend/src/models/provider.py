@@ -9,6 +9,10 @@ from langchain_anthropic import ChatAnthropic
 from src.auth.credentials import load_credential, load_model_config
 from src.models.registry import get_provider
 
+# Shared httpx clients for codex-responses provider to avoid leaking per-call
+_codex_sync_client: httpx.Client | None = None
+_codex_async_client: httpx.AsyncClient | None = None
+
 
 def _extract_chatgpt_account_id(jwt_token: str) -> str:
     """Parse chatgpt_account_id from the payload of an OpenAI OAuth JWT.
@@ -121,14 +125,19 @@ async def _create_chat_model(provider_id: str, model: str) -> BaseChatModel:
             # messages LangChain put into `input` up into `instructions`.
             kwargs["model_kwargs"] = {"instructions": "You are a helpful assistant."}
             kwargs["store"] = False
-            kwargs["http_client"] = httpx.Client(
-                event_hooks={"request": [_codex_rewrite_request]},
-                timeout=httpx.Timeout(60.0, connect=10.0),
-            )
-            kwargs["http_async_client"] = httpx.AsyncClient(
-                event_hooks={"request": [_async_codex_rewrite_request]},
-                timeout=httpx.Timeout(60.0, connect=10.0),
-            )
+            global _codex_sync_client, _codex_async_client
+            if _codex_sync_client is None:
+                _codex_sync_client = httpx.Client(
+                    event_hooks={"request": [_codex_rewrite_request]},
+                    timeout=httpx.Timeout(60.0, connect=10.0),
+                )
+            if _codex_async_client is None:
+                _codex_async_client = httpx.AsyncClient(
+                    event_hooks={"request": [_async_codex_rewrite_request]},
+                    timeout=httpx.Timeout(60.0, connect=10.0),
+                )
+            kwargs["http_client"] = _codex_sync_client
+            kwargs["http_async_client"] = _codex_async_client
         return ChatOpenAI(**kwargs)
 
     if provider["client"] == "anthropic":

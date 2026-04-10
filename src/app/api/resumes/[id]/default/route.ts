@@ -24,11 +24,13 @@ export async function PATCH(
     return NextResponse.json({ error: "Resume not found" }, { status: 404 });
   }
 
-  db.update(resumes).set({ isDefault: 0 }).run();
-  db.update(resumes)
-    .set({ isDefault: 1 })
-    .where(eq(resumes.id, resumeId))
-    .run();
+  db.transaction((tx) => {
+    tx.update(resumes).set({ isDefault: 0 }).run();
+    tx.update(resumes)
+      .set({ isDefault: 1 })
+      .where(eq(resumes.id, resumeId))
+      .run();
+  });
 
   return NextResponse.json({ ok: true, resumeId });
 }

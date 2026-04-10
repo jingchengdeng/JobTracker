@@ -31,7 +31,8 @@ async def load_session(session_id: int) -> dict:
         )
         row = await cursor.fetchone()
     if not row:
-        raise ValueError(f"Session {session_id} not found")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
     return dict(row)
 
 

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { resumes } from "@/db/schema";
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import fs from "fs";
 import path from "path";
 
@@ -31,12 +31,11 @@ export async function POST(request: NextRequest) {
     fs.mkdirSync(UPLOAD_DIR, { recursive: true });
   }
 
-  // Save the file
   const buffer = Buffer.from(await file.arrayBuffer());
   const fileName = `${Date.now()}-${file.name}`;
   const filePath = path.join(UPLOAD_DIR, fileName);
-  fs.writeFileSync(filePath, buffer);
 
+  // Insert DB row first, then write file. If file write fails, remove the row.
   const result = db
     .insert(resumes)
     .values({
@@ -47,6 +46,13 @@ export async function POST(request: NextRequest) {
     })
     .returning()
     .get();
+
+  try {
+    fs.writeFileSync(filePath, buffer);
+  } catch (err) {
+    db.delete(resumes).where(eq(resumes.id, result.id)).run();
+    throw err;
+  }
 
   // Trigger text extraction in the Python backend (fire-and-forget)
   fetch(`http://localhost:8000/api/extract-text`, {

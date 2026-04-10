@@ -40,15 +40,20 @@ async def start_interview(req: StartRequest):
             detail="OpenAI API key required for speech-to-text and text-to-speech. Add one in Settings > API Keys.",
         )
 
-    session_id = await create_session(
-        job_id=req.job_id,
-        resume_id=req.resume_id,
-        interview_type=req.interview_type,
-        difficulty=req.difficulty,
-        duration_minutes=req.duration_minutes,
-        voice=req.voice,
-        focus_area=req.focus_area,
-    )
+    try:
+        session_id = await create_session(
+            job_id=req.job_id,
+            resume_id=req.resume_id,
+            interview_type=req.interview_type,
+            difficulty=req.difficulty,
+            duration_minutes=req.duration_minutes,
+            voice=req.voice,
+            focus_area=req.focus_area,
+        )
+    except Exception as exc:
+        if "FOREIGN KEY constraint failed" in str(exc):
+            raise HTTPException(status_code=400, detail="Invalid job_id or resume_id")
+        raise
 
     async def _do_planning():
         try:

@@ -13,13 +13,15 @@ from src.auth.credentials import load_api_key
 logger = logging.getLogger(__name__)
 
 _client: AsyncOpenAI | None = None
+_client_key: str | None = None
 
 
 async def _get_openai_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        api_key = await load_api_key("openai")
+    global _client, _client_key
+    api_key = await load_api_key("openai")
+    if _client is None or api_key != _client_key:
         _client = AsyncOpenAI(api_key=api_key)
+        _client_key = api_key
     return _client
 
 
