@@ -7,8 +7,6 @@ import {
   SOURCES,
   GOAL_TYPES,
   AI_RUN_STATUSES,
-  AI_STEP_TYPES,
-  AI_STEP_STATUSES,
   AI_MESSAGE_ROLES,
   RESUME_FILE_TYPES,
   INTERVIEW_STATUSES,
@@ -105,20 +103,24 @@ export const aiRuns = sqliteTable("ai_runs", {
   completedAt: text("completed_at"),
 });
 
-export const aiSteps = sqliteTable("ai_steps", {
+export const pipelineEvents = sqliteTable("pipeline_events", {
   id: integer().primaryKey({ autoIncrement: true }),
-  runId: integer("run_id")
-    .notNull()
-    .references(() => aiRuns.id),
-  stepType: text("step_type", { enum: AI_STEP_TYPES }).notNull(),
-  status: text({ enum: AI_STEP_STATUSES }).notNull().default("pending"),
+  workflowRunId: text("workflow_run_id").notNull(),
+  jobId: integer("job_id").references(() => jobs.id, { onDelete: "cascade" }),
+  graph: text().notNull(),
+  nodeName: text("node_name").notNull(),
+  status: text().notNull(),
+  attempt: integer().notNull().default(1),
+  startedAt: text("started_at"),
+  completedAt: text("completed_at"),
+  durationMs: integer("duration_ms"),
+  error: text(),
+  traceback: text(),
+  runId: integer("run_id").references(() => aiRuns.id, { onDelete: "cascade" }),
+  stepType: text("step_type"),
   result: text(),
   version: integer().notNull().default(1),
   roundNumber: integer("round_number").notNull().default(0),
-  createdAt: text("created_at")
-    .notNull()
-    .default(sql`(datetime('now'))`),
-  completedAt: text("completed_at"),
 });
 
 export const aiMessages = sqliteTable("ai_messages", {
