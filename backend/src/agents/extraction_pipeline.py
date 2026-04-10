@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 import httpx
@@ -110,7 +111,7 @@ GENERAL RULES:
 
 
 async def extract_fields(state: ExtractionState) -> ExtractionState:
-    llm = get_linkedin_model()
+    llm = await get_linkedin_model()
     structured_llm = llm.with_structured_output(LinkedInJobExtraction, method="function_calling")
 
     raw_text = state["raw_text"]

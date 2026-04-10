@@ -15,16 +15,16 @@ logger = logging.getLogger(__name__)
 _client: AsyncOpenAI | None = None
 
 
-def _get_openai_client() -> AsyncOpenAI:
+async def _get_openai_client() -> AsyncOpenAI:
     global _client
     if _client is None:
-        api_key = load_api_key("openai")
+        api_key = await load_api_key("openai")
         _client = AsyncOpenAI(api_key=api_key)
     return _client
 
 
 async def transcribe_audio(audio_bytes: bytes) -> str | None:
-    client = _get_openai_client()
+    client = await _get_openai_client()
     audio_file = io.BytesIO(audio_bytes)
     audio_file.name = "audio.webm"
 
@@ -37,7 +37,7 @@ async def transcribe_audio(audio_bytes: bytes) -> str | None:
 
 
 async def synthesize_speech(text: str, voice: str) -> AsyncIterator[bytes]:
-    client = _get_openai_client()
+    client = await _get_openai_client()
     response = await asyncio.wait_for(
         client.audio.speech.create(model=TTS_MODEL, voice=voice, input=text, response_format="mp3"),
         timeout=15.0,

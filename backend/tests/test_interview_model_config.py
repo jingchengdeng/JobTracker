@@ -1,4 +1,4 @@
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch, MagicMock, AsyncMock
 import pytest
 
 
@@ -34,16 +34,16 @@ class TestInterviewModelConfig:
         result = _migrate_model_config(new)
         assert result["interview"]["provider"] == "anthropic"
 
-    @patch("src.models.provider.load_model_config")
-    @patch("src.models.provider._create_chat_model")
-    def test_get_interview_model(self, mock_create, mock_config):
+    @patch("src.models.provider.load_model_config", new_callable=AsyncMock)
+    @patch("src.models.provider._create_chat_model", new_callable=AsyncMock)
+    async def test_get_interview_model(self, mock_create, mock_config):
         from src.models.provider import get_interview_model
 
         mock_config.return_value = {
             "interview": {"provider": "openai", "model": "gpt-5.4-mini", "fallback": None},
         }
         mock_create.return_value = MagicMock()
-        get_interview_model()
+        await get_interview_model()
         mock_create.assert_called_once_with("openai", "gpt-5.4-mini")
 
 

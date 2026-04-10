@@ -173,7 +173,7 @@ async def lifespan(app: FastAPI):
         try:
             import importlib
             mod = importlib.import_module(module_path)
-            module_tasks = getattr(mod, "_background_tasks", set())
+            module_tasks = set(getattr(mod, "_background_tasks", set()))
             all_tasks |= module_tasks
         except (ImportError, AttributeError):
             pass

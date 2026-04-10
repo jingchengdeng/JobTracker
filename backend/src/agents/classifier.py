@@ -42,7 +42,7 @@ Previous context: {context}
 
 async def classify_followup(message: str, context: str = "") -> ClassifierOutput:
     """Classify a follow-up message to determine which pipeline steps to re-run."""
-    llm = await asyncio.to_thread(get_classifier_model)
+    llm = await get_classifier_model()
     structured_llm = llm.with_structured_output(ClassifierOutput, method="function_calling")
 
     result = await structured_llm.ainvoke(

@@ -303,7 +303,7 @@ async def _classify_and_run_pipeline(
         return
 
     try:
-        llm = await asyncio.to_thread(get_chat_model)
+        llm = await get_chat_model()
         await summarize_old_rounds(run_id, llm)
     except Exception as exc:
         logger.warning("summarize_old_rounds failed (non-fatal): %s", exc)

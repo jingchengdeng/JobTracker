@@ -29,7 +29,7 @@ def build_system_prompt(preferences: list[str], conversation_summary: str | None
 
 async def step_jd_analysis(state: dict) -> dict:
     """Analyze the job description and extract structured requirements."""
-    llm = await asyncio.to_thread(get_chat_model)
+    llm = await get_chat_model()
     structured_llm = llm.with_structured_output(JdAnalysis, method="function_calling")
 
     prompt = (
@@ -79,7 +79,7 @@ async def step_rag_retrieval(state: dict) -> dict:
 
 async def step_gap_analysis(state: dict) -> dict:
     """Compare JD requirements against the resume and RAG-retrieved experience."""
-    llm = await asyncio.to_thread(get_chat_model)
+    llm = await get_chat_model()
     structured_llm = llm.with_structured_output(GapAnalysis, method="function_calling")
 
     rag_section = ""
@@ -114,7 +114,7 @@ async def step_gap_analysis(state: dict) -> dict:
 
 async def step_suggestions(state: dict) -> dict:
     """Generate section-by-section rewrite suggestions."""
-    llm = await asyncio.to_thread(get_chat_model)
+    llm = await get_chat_model()
     structured_llm = llm.with_structured_output(Suggestions, method="function_calling")
 
     recent_messages = state.get("recent_messages", [])
@@ -148,7 +148,7 @@ async def step_suggestions(state: dict) -> dict:
 
 async def step_rewrite(state: dict) -> dict:
     """Generate the full rewritten resume."""
-    llm = await asyncio.to_thread(get_chat_model)
+    llm = await get_chat_model()
     structured_llm = llm.with_structured_output(RewriteResult, method="function_calling")
 
     recent_messages = state.get("recent_messages", [])

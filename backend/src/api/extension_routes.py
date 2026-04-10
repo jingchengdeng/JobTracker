@@ -3,6 +3,8 @@ import os
 import re
 import logging
 from pathlib import Path
+
+import aiofiles
 from urllib.parse import urlparse
 
 import httpx
@@ -96,7 +98,8 @@ async def extract(req: ExtractRequest):
     filepath = extractions_dir / filename
 
     content = _format_extraction(req)
-    filepath.write_text(content, encoding="utf-8")
+    async with aiofiles.open(filepath, "w", encoding="utf-8") as f:
+        await f.write(content)
 
     logger.info("Saved extraction to %s", filepath)
 

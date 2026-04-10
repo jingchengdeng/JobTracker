@@ -37,7 +37,7 @@ def _build_system_prompt(session: dict, preferences: list[str]) -> str:
 
 async def run_planning(session_id: int) -> None:
     session = await load_session(session_id)
-    llm = await asyncio.to_thread(get_interview_model)
+    llm = await get_interview_model()
     structured_llm = llm.with_structured_output(InterviewPlan, method="function_calling")
     preferences = await load_all_preferences()
 
@@ -84,7 +84,7 @@ async def process_interview_turn(session_id: int, transcript: str) -> TurnRespon
 
     await save_turn(session_id, "candidate", transcript)
 
-    llm = await asyncio.to_thread(get_interview_model)
+    llm = await get_interview_model()
     system = _build_system_prompt(session, preferences)
 
     history = "\n".join(
@@ -143,7 +143,7 @@ async def run_scoring(session_id: int) -> None:
     from src.agents.interview_config import SCORING_DIMENSIONS
     dimensions = SCORING_DIMENSIONS.get(session["interview_type"], SCORING_DIMENSIONS["technical"])
 
-    llm = await asyncio.to_thread(get_interview_model)
+    llm = await get_interview_model()
     structured_llm = llm.with_structured_output(InterviewScore, method="function_calling")
 
     history = "\n".join(

@@ -33,7 +33,7 @@ class StartRequest(BaseModel):
 @router.post("/start")
 async def start_interview(req: StartRequest):
     # Validate OpenAI credentials for STT/TTS
-    openai_cred = load_credential("openai")
+    openai_cred = await load_credential("openai")
     if not openai_cred:
         raise HTTPException(
             status_code=400,

@@ -85,16 +85,9 @@ async def save_turn(
 ) -> int:
     async with get_connection() as conn:
         cursor = await conn.execute(
-            "SELECT COALESCE(MAX(turn_number), 0) FROM interview_turns WHERE session_id = ?",
-            (session_id,),
-        )
-        row = await cursor.fetchone()
-        current_max = row[0]
-        turn_number = current_max + 1
-        cursor = await conn.execute(
             "INSERT INTO interview_turns (session_id, turn_number, role, text, audio_duration_ms, plan_topic_ref) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (session_id, turn_number, role, text, audio_duration_ms, plan_topic_ref),
+            "VALUES (?, (SELECT COALESCE(MAX(turn_number), 0) + 1 FROM interview_turns WHERE session_id = ?), ?, ?, ?, ?)",
+            (session_id, session_id, role, text, audio_duration_ms, plan_topic_ref),
         )
         turn_id = cursor.lastrowid
         await conn.commit()

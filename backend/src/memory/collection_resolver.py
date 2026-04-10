@@ -1,3 +1,4 @@
+import asyncio
 import os
 
 import chromadb
@@ -10,9 +11,14 @@ from src.services.embeddings import embedding_function_for_signature
 CHROMADB_HOST = os.environ.get("CHROMADB_HOST", "localhost")
 CHROMADB_PORT = int(os.environ.get("CHROMADB_PORT", "8200"))
 
+_chroma_client: chromadb.AsyncClientAPI | None = None
 
-async def _client():
-    return await chromadb.AsyncHttpClient(host=CHROMADB_HOST, port=CHROMADB_PORT)
+
+async def _client() -> chromadb.AsyncClientAPI:
+    global _chroma_client
+    if _chroma_client is None:
+        _chroma_client = await chromadb.AsyncHttpClient(host=CHROMADB_HOST, port=CHROMADB_PORT)
+    return _chroma_client
 
 
 async def active_collection():
@@ -20,7 +26,7 @@ async def active_collection():
     signature = await get_active_signature()
     if signature is None:
         return None
-    config = load_model_config()
+    config = await load_model_config()
     embedding = config["embedding"]
     return await collection_for_signature(
         signature,
@@ -31,7 +37,7 @@ async def active_collection():
 
 async def collection_for_signature(signature: str, *, provider: str, model: str):
     """Get-or-create the Chroma collection for a specific signature."""
-    ef = embedding_function_for_signature(signature, provider=provider, model=model)
+    ef = await embedding_function_for_signature(signature, provider=provider, model=model)
     client = await _client()
     return await client.get_or_create_collection(
         name=collection_name_for(signature),

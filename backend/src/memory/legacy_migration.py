@@ -24,7 +24,7 @@ async def migrate_legacy_collection() -> None:
         logger.info("No legacy resume_chunks collection; skipping migration")
         return
 
-    config = load_model_config()
+    config = await load_model_config()
     embedding = config["embedding"]
     target_sig = signature_for(embedding["provider"], embedding["model"])
     logger.info("Migrating legacy collection to signature %s", target_sig)

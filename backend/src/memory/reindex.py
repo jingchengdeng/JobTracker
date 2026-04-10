@@ -74,10 +74,9 @@ async def start_reindex_job(
             started_at=_now_iso(),
         )
         _jobs[job.job_id] = job
-
-    job.task = asyncio.create_task(
-        _run_job(job, provider=provider, model=model, resume_ids=resume_ids)
-    )
+        job.task = asyncio.create_task(
+            _run_job(job, provider=provider, model=model, resume_ids=resume_ids)
+        )
     return job.job_id
 
 
@@ -109,8 +108,8 @@ async def _run_job(
             job.failed.append({"resume_id": r["id"], "error": "No extracted text on file"})
             continue
         try:
-            async def op():
-                await index_resume_into(collection, r["id"], r["name"], r["extracted_text"])
+            async def op(resume=r):
+                await index_resume_into(collection, resume["id"], resume["name"], resume["extracted_text"])
             await with_retry(op, retries=3, backoff=(1.0, 2.0, 4.0))
             await mark_resume_ok(r["id"], job.target_signature)
             job.succeeded.append(r["id"])
