@@ -1,3 +1,4 @@
+import uuid
 from typing import TypedDict, Optional
 
 from langgraph.graph import StateGraph, END
@@ -14,6 +15,7 @@ from src.agents.pipeline_tracking import _format_pipeline_error
 
 
 class ResumeAgentState(TypedDict):
+    workflow_run_id: str
     job_id: int
     resume_id: int
     run_id: int
@@ -32,65 +34,6 @@ class ResumeAgentState(TypedDict):
     needs_suggestions: bool
     needs_rewrite: bool
     round_number: int
-
-
-async def _update_step_status(
-    run_id: int, step_type: str, status: str, result: str | None = None, round_number: int = 0
-):
-    """Update or create a step record in the database."""
-    async with get_connection() as conn:
-        cursor = await conn.execute(
-            "SELECT id, version FROM ai_steps WHERE run_id = ? AND step_type = ? ORDER BY version DESC LIMIT 1",
-            (run_id, step_type),
-        )
-        existing = await cursor.fetchone()
-
-        if existing and status == "running":
-            await conn.execute(
-                "INSERT INTO ai_steps (run_id, step_type, status, version, round_number) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (run_id, step_type, status, existing["version"] + 1, round_number),
-            )
-        elif existing:
-            # UPDATE targets the latest-version row, which was INSERTed at "running"
-            # with the correct round_number. No need to overwrite it here.
-            await conn.execute(
-                "UPDATE ai_steps SET status = ?, result = ?, completed_at = datetime('now') WHERE id = ?",
-                (status, result, existing["id"]),
-            )
-        else:
-            await conn.execute(
-                "INSERT INTO ai_steps (run_id, step_type, status, result, round_number) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (run_id, step_type, status, result, round_number),
-            )
-
-        await conn.commit()
-
-
-def _wrap_step(step_type: str, step_fn):
-    """Wrap a pipeline step to track status in the database."""
-    async def wrapped(state: ResumeAgentState) -> ResumeAgentState:
-        run_id = state["run_id"]
-        round_number = state["round_number"]
-        await _update_step_status(run_id, step_type, "running", round_number=round_number)
-        try:
-            new_state = await step_fn(state)
-            result_key = {
-                "jd_analysis": "jd_analysis",
-                "gap_analysis": "gap_analysis",
-                "suggestions": "suggestions",
-                "rewrite": "rewrite",
-            }.get(step_type, step_type)
-            await _update_step_status(
-                run_id, step_type, "completed",
-                result=new_state.get(result_key), round_number=round_number,
-            )
-            return new_state
-        except Exception as e:
-            await _update_step_status(run_id, step_type, "failed", result=str(e), round_number=round_number)
-            raise
-    return wrapped
 
 
 def _should_run(step_type: str):
@@ -122,11 +65,11 @@ def build_graph() -> StateGraph:
     """Build the LangGraph workflow for resume analysis."""
     graph = StateGraph(ResumeAgentState)
 
-    graph.add_node("jd_analysis", _wrap_step("jd_analysis", step_jd_analysis))
+    graph.add_node("jd_analysis", step_jd_analysis)
     graph.add_node("rag_retrieval", step_rag_retrieval)
-    graph.add_node("gap_analysis", _wrap_step("gap_analysis", step_gap_analysis))
-    graph.add_node("suggestions", _wrap_step("suggestions", step_suggestions))
-    graph.add_node("rewrite", _wrap_step("rewrite", step_rewrite))
+    graph.add_node("gap_analysis", step_gap_analysis)
+    graph.add_node("suggestions", step_suggestions)
+    graph.add_node("rewrite", step_rewrite)
 
     graph.set_conditional_entry_point(
         _should_run("jd_analysis"),
@@ -208,6 +151,7 @@ async def run_pipeline(
     needs_gap_analysis: bool = True,
     needs_suggestions: bool = True,
     needs_rewrite: bool = True,
+    workflow_run_id: str | None = None,
 ):
     """Execute the resume analysis pipeline.
 
@@ -222,7 +166,10 @@ async def run_pipeline(
         )
         await conn.commit()
 
+    workflow_run_id = workflow_run_id or str(uuid.uuid4())
+
     state = {
+        "workflow_run_id": workflow_run_id,
         "job_id": job_id,
         "resume_id": resume_id,
         "run_id": run_id,

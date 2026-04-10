@@ -100,6 +100,7 @@ async def resume_branch(state: dict) -> dict:
             jd_text=state.get("description") or "",
             resume_text=state["resume_text"],
             round_number=0,
+            workflow_run_id=state.get("workflow_run_id"),
         )
     except Exception as exc:
         logger.error("Resume tailor branch failed for job %s: %s", state["job_id"], exc)
