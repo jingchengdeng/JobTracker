@@ -7,14 +7,10 @@ import logging
 import httpx
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from src.agents.linkedin_db import (
-    create_search, update_search_status, save_company_data, save_contacts, load_search,
-)
+from src.agents.linkedin_db import update_search_status
 from src.agents.linkedin_schemas import (
     JdAnalysis, RelevanceScores, ConnectionNotes, CompanySummary, LeadershipReview,
 )
-from src.agents.linkedin_search import brave_search_profiles, brave_search_domain, SEARCH_DELAY_SECONDS
-from src.db import get_connection
 from src.models.provider import get_linkedin_model
 from src.auth.credentials import load_api_key
 
@@ -305,147 +301,29 @@ async def search_domain_google(browser, company: str) -> str | None:
 
 # --- Main pipeline entry point ---
 
-async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
-    """Run the full linkedin search pipeline. Called as a background asyncio task.
+async def run_linkedin_pipeline(
+    search_id: int, job_id: int, workflow_run_id: str | None = None,
+) -> None:
+    """Thin wrapper around the compiled linkedin_graph.
 
-    Uses Brave Search API when key is configured (no browser needed).
-    Falls back to headed Google via Xvfb if no Brave key, or headless as last resort.
+    The actual 14-step logic lives in linkedin_graph.py as graph nodes.
+    This wrapper exists so the existing call sites (master_workflow
+    resume_branch, linkedin_routes.start_search) don't need to import
+    linkedin_graph directly.
     """
-    async with get_connection() as conn:
-        cursor = await conn.execute(
-            "SELECT id, title, company, description FROM jobs WHERE id = ?", (job_id,)
-        )
-        row = await cursor.fetchone()
+    import uuid
+    from src.agents.linkedin_graph import linkedin_graph
 
-    if not row:
-        await update_search_status(search_id, "failed")
-        return
+    wf_id = workflow_run_id or str(uuid.uuid4())
 
-    job = dict(row)
+    initial_state = {
+        "search_id": search_id,
+        "job_id": job_id,
+        "workflow_run_id": wf_id,
+    }
 
     try:
-        # 1. Precondition check
-        check = await precondition_check(job)
-        mode = check["mode"]
-
-        # 2. Analyze JD (if full mode)
-        analysis = None
-        if mode == "full":
-            analysis = await run_analyze_jd(job)
-
-        # 3. Extract domain from JD text
-        domain = None
-        if job.get("description"):
-            domain = await run_extract_domain(job)
-        logger.info("Domain from JD extraction: %s", domain)
-
-        # 4. Check for Brave API key
-        brave_key = await load_api_key("brave")
-
-        # 5. Domain search fallback (if JD extraction found nothing)
-        if not domain and brave_key:
-            domain = await brave_search_domain(job["company"], brave_key)
-            logger.info("Domain from Brave search: %s", domain)
-
-        # 6. Apollo enrichment (if domain found + key configured)
-        company_data = None
-        if domain:
-            company_data = await enrich_company_apollo(domain)
-            logger.info("Apollo enrichment result: %s", "success" if company_data else "no data")
-
-        # 7. Build and run search queries
-        queries = await build_search_queries(job["company"], analysis)
-        search_results: dict[str, list[dict]] = {}
-
-        if brave_key:
-            # Brave API path (no browser needed)
-            for q in queries:
-                results = await brave_search_profiles(q["query"], brave_key, 15)
-                search_results[q["tag"]] = results
-                logger.info("Brave search '%s': %d results", q["tag"], len(results))
-                await asyncio.sleep(SEARCH_DELAY_SECONDS)
-        else:
-            # Browser fallback path (Google via Playwright)
-            from playwright.async_api import async_playwright
-            from src.agents.linkedin_search import launch_stealth_browser, run_google_search
-
-            async with async_playwright() as pw:
-                browser, display = await launch_stealth_browser(pw, headless=False)
-                try:
-                    # Domain search via browser if still needed
-                    if not domain:
-                        domain = await search_domain_google(browser, job["company"])
-                        logger.info("Domain from Google search: %s", domain)
-                        await asyncio.sleep(SEARCH_DELAY_SECONDS)
-
-                        # Apollo enrichment with browser-found domain
-                        if domain and not company_data:
-                            company_data = await enrich_company_apollo(domain)
-
-                    # Profile searches via browser
-                    for q in queries:
-                        results = await run_google_search(browser, q["query"])
-                        search_results[q["tag"]] = results
-                        logger.info("Google search '%s': %d results", q["tag"], len(results))
-                        await asyncio.sleep(SEARCH_DELAY_SECONDS)
-                finally:
-                    await browser.close()
-                    if display:
-                        display.stop()
-
-        # 8. Review leadership results (if applicable)
-        if "leadership" in search_results and analysis and search_results["leadership"]:
-            review = await run_review_leadership(search_results["leadership"], analysis["role_domain"])
-            if review.needs_retry and review.refined_query:
-                retry_query = f'site:linkedin.com/in "{review.refined_query}" {job["company"]}'
-                if brave_key:
-                    retry_results = await brave_search_profiles(retry_query, brave_key)
-                else:
-                    logger.warning("Leadership retry skipped — no Brave key, browser already closed")
-                    retry_results = []
-                if retry_results:
-                    search_results["leadership"] = retry_results
-                await asyncio.sleep(SEARCH_DELAY_SECONDS)
-
-        # 9. Merge and deduplicate
-        total_raw = sum(len(v) for v in search_results.values())
-        merged = await merge_and_deduplicate(search_results)
-        logger.info("Merged contacts: %d (from %d raw results across %d queries)", len(merged), total_raw, len(queries))
-        if not merged:
-            logger.warning(
-                "No LinkedIn profiles found for '%s' — company may be too small or obscure for web search",
-                job["company"],
-            )
-
-        # 10. Score relevance
-        if merged:
-            merged = await run_score_relevance(merged, job, analysis)
-
-        # 11. Filter and rank
-        ranked = await filter_and_rank(merged)
-
-        # 12. Generate connection notes
-        if ranked:
-            ranked = await run_generate_notes(ranked, job)
-
-        # 13. Compile company summary
-        summary = None
-        if company_data:
-            summary = await run_compile_summary(company_data, job)
-
-        # 14. Save results
-        if company_data or domain:
-            await save_company_data(
-                search_id,
-                domain=domain or "",
-                data_json=json.dumps(company_data) if company_data else "{}",
-                summary=summary or "",
-            )
-
-        await save_contacts(search_id, ranked)
-        logger.info("LinkedIn search %s completed: %d contacts saved", search_id, len(ranked))
-        await update_search_status(search_id, "completed")
-
+        await linkedin_graph.ainvoke(initial_state)
     except Exception as exc:
         logger.exception("LinkedIn pipeline failed for search %s: %s", search_id, exc)
         await update_search_status(search_id, "failed")

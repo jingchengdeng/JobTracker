@@ -123,7 +123,10 @@ async def linkedin_branch(state: dict) -> dict:
         from src.agents.linkedin_db import create_search
         from src.agents.linkedin_pipeline import run_linkedin_pipeline
         search_id = await create_search(job_id=state["job_id"])
-        await run_linkedin_pipeline(search_id, state["job_id"])
+        await run_linkedin_pipeline(
+            search_id, state["job_id"],
+            workflow_run_id=state.get("workflow_run_id"),
+        )
     except Exception as exc:
         logger.error("LinkedIn research branch failed for job %s: %s", state["job_id"], exc)
     return {}
