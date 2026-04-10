@@ -23,6 +23,7 @@ dependencies = [
     "websockets>=12.0",
     "playwright>=1.40.0",
     "aiofiles>=25.1.0",
+    "sse-starlette>=3.3.4",
 ]
 
 [project.optional-dependencies]

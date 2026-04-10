@@ -1,0 +1,141 @@
+"""Pipeline debug tab API.
+
+- GET /api/pipeline/current?job_id=X  — snapshot of latest rows per graph
+- GET /api/pipeline/stream?job_id=X   — SSE stream of events
+- GET /api/pipeline/orphans?workflow_run_id=X — NULL job_id rows for debugging
+"""
+import asyncio
+import json
+import logging
+
+from fastapi import APIRouter, HTTPException, Request
+from sse_starlette.sse import EventSourceResponse
+
+from src.agents.pipeline_tracking import bus, PipelineEvent
+from src.db import get_connection
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
+
+
+async def _fetch_snapshot(job_id: int) -> dict:
+    """Return {active_runs: {...}, nodes: [...]} for the given job."""
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """
+            WITH latest_per_graph AS (
+                SELECT graph, MAX(started_at) AS latest_ts
+                  FROM pipeline_events
+                 WHERE job_id = ?
+              GROUP BY graph
+            ),
+            active_ids AS (
+                SELECT DISTINCT pe.graph, pe.workflow_run_id
+                  FROM pipeline_events pe
+                  JOIN latest_per_graph lpg
+                    ON pe.graph = lpg.graph AND pe.started_at = lpg.latest_ts
+                 WHERE pe.job_id = ?
+            )
+            SELECT pe.*
+              FROM pipeline_events pe
+              JOIN active_ids ai
+                ON pe.graph = ai.graph AND pe.workflow_run_id = ai.workflow_run_id
+             WHERE pe.job_id = ?
+          ORDER BY pe.id
+            """,
+            (job_id, job_id, job_id),
+        )
+        rows = [dict(r) for r in await cursor.fetchall()]
+
+    active_runs = {"master": None, "resume": None, "linkedin": None}
+    for row in rows:
+        g = row["graph"]
+        if g in active_runs and active_runs[g] is None:
+            active_runs[g] = row["workflow_run_id"]
+
+    nodes = [
+        {
+            "graph": r["graph"],
+            "node_name": r["node_name"],
+            "status": r["status"],
+            "attempt": r["attempt"],
+            "workflow_run_id": r["workflow_run_id"],
+            "version": r["version"],
+            "round_number": r["round_number"],
+            "duration_ms": r["duration_ms"],
+            "error": r["error"],
+            "traceback": r["traceback"],
+            "started_at": r["started_at"],
+            "completed_at": r["completed_at"],
+        }
+        for r in rows
+    ]
+
+    return {"active_runs": active_runs, "nodes": nodes}
+
+
+@router.get("/current")
+async def get_current(job_id: int):
+    return await _fetch_snapshot(job_id)
+
+
+@router.get("/orphans")
+async def get_orphans(workflow_run_id: str):
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "SELECT * FROM pipeline_events WHERE workflow_run_id = ? AND job_id IS NULL",
+            (workflow_run_id,),
+        )
+        rows = [dict(r) for r in await cursor.fetchall()]
+    return {"rows": rows}
+
+
+@router.get("/stream")
+async def stream(job_id: int, request: Request):
+    async def event_generator():
+        snapshot = await _fetch_snapshot(job_id)
+        yield {"event": "message", "data": json.dumps({"type": "snapshot", **snapshot})}
+
+        active_runs = dict(snapshot["active_runs"])
+
+        async for event in bus.subscribe(job_id=job_id):
+            if await request.is_disconnected():
+                break
+
+            graph = event.graph
+            incoming_wf = event.workflow_run_id
+            current_wf = active_runs.get(graph)
+
+            if current_wf is None:
+                active_runs[graph] = incoming_wf
+            elif current_wf != incoming_wf:
+                yield {
+                    "event": "message",
+                    "data": json.dumps({
+                        "type": "graph_reset",
+                        "graph": graph,
+                        "workflow_run_id": incoming_wf,
+                    }),
+                }
+                active_runs[graph] = incoming_wf
+
+            yield {
+                "event": "message",
+                "data": json.dumps({
+                    "type": "event",
+                    "graph": event.graph,
+                    "workflow_run_id": event.workflow_run_id,
+                    "node_name": event.node_name,
+                    "status": event.status,
+                    "attempt": event.attempt,
+                    "version": event.version,
+                    "round_number": event.round_number,
+                    "duration_ms": event.duration_ms,
+                    "error": event.error,
+                    "traceback": event.traceback,
+                    "job_id": event.job_id,
+                }),
+            }
+
+    return EventSourceResponse(event_generator())
