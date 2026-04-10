@@ -68,12 +68,30 @@ def test_db(tmp_path, monkeypatch):
     return db_path
 
 
+@pytest.fixture
+async def migrated_db_with_resumes(migrated_db):
+    """Extends migrated_db (which has pipeline_events) with a resumes table."""
+    import aiosqlite
+    async with aiosqlite.connect(migrated_db) as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS resumes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                extracted_text TEXT,
+                is_default INTEGER NOT NULL DEFAULT 0
+            )
+        """)
+        await conn.commit()
+    return migrated_db
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 def _make_state(**overrides) -> dict:
     base = {
+        "workflow_run_id": "test-run-id",
         "raw_text": "Some job text",
         "url": "https://linkedin.com/jobs/view/123",
         "extracted": {
@@ -104,36 +122,36 @@ def _make_state(**overrides) -> dict:
 # ---------------------------------------------------------------------------
 
 class TestShouldFanOut:
-    def test_returns_end_when_job_id_is_none(self):
+    async def test_returns_end_when_job_id_is_none(self):
         from src.agents.master_workflow import _should_fan_out
 
         state = _make_state(job_id=None)
-        assert _should_fan_out(state) == "end"
+        assert await _should_fan_out(state) == "end"
 
-    def test_returns_end_when_error_present(self):
+    async def test_returns_end_when_error_present(self):
         from src.agents.master_workflow import _should_fan_out
 
         state = _make_state(job_id=42, error="Something went wrong")
-        assert _should_fan_out(state) == "end"
+        assert await _should_fan_out(state) == "end"
 
-    def test_returns_end_when_both_job_id_none_and_error(self):
+    async def test_returns_end_when_both_job_id_none_and_error(self):
         from src.agents.master_workflow import _should_fan_out
 
         state = _make_state(job_id=None, error="Failed to insert")
-        assert _should_fan_out(state) == "end"
+        assert await _should_fan_out(state) == "end"
 
-    def test_returns_resolve_default_resume_when_job_id_exists(self):
+    async def test_returns_resolve_default_resume_when_job_id_exists(self):
         from src.agents.master_workflow import _should_fan_out
 
         state = _make_state(job_id=99, error=None)
-        assert _should_fan_out(state) == "resolve_default_resume"
+        assert await _should_fan_out(state) == "resolve_default_resume"
 
-    def test_returns_resolve_default_resume_with_zero_is_still_no_job(self):
+    async def test_returns_resolve_default_resume_with_zero_is_still_no_job(self):
         from src.agents.master_workflow import _should_fan_out
 
         # job_id=0 is falsy, should be treated as no job
         state = _make_state(job_id=0, error=None)
-        assert _should_fan_out(state) == "end"
+        assert await _should_fan_out(state) == "end"
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +159,7 @@ class TestShouldFanOut:
 # ---------------------------------------------------------------------------
 
 class TestFanOut:
-    def test_returns_only_linkedin_when_no_default_resume(self):
+    async def test_returns_only_linkedin_when_no_default_resume(self):
         from langgraph.types import Send
         from src.agents.master_workflow import fan_out
 
@@ -151,14 +169,14 @@ class TestFanOut:
             default_resume_text=None,
             default_resume_name=None,
         )
-        sends = fan_out(state)
+        sends = await fan_out(state)
 
         assert len(sends) == 1
         assert isinstance(sends[0], Send)
         assert sends[0].node == "linkedin_branch"
         assert sends[0].arg["job_id"] == 42
 
-    def test_returns_both_when_default_resume_exists(self):
+    async def test_returns_both_when_default_resume_exists(self):
         from langgraph.types import Send
         from src.agents.master_workflow import fan_out
 
@@ -168,13 +186,13 @@ class TestFanOut:
             default_resume_text="My resume text here.",
             default_resume_name="My Resume",
         )
-        sends = fan_out(state)
+        sends = await fan_out(state)
 
         assert len(sends) == 2
         nodes = {s.node for s in sends}
         assert nodes == {"linkedin_branch", "resume_branch"}
 
-    def test_resume_branch_send_has_correct_payload(self):
+    async def test_resume_branch_send_has_correct_payload(self):
         from langgraph.types import Send
         from src.agents.master_workflow import fan_out
 
@@ -184,7 +202,7 @@ class TestFanOut:
             default_resume_text="My resume text.",
             default_resume_name="Dev Resume",
         )
-        sends = fan_out(state)
+        sends = await fan_out(state)
 
         resume_send = next(s for s in sends if s.node == "resume_branch")
         assert resume_send.arg["job_id"] == 42
@@ -192,7 +210,7 @@ class TestFanOut:
         assert resume_send.arg["resume_text"] == "My resume text."
         assert resume_send.arg["resume_name"] == "Dev Resume"
 
-    def test_returns_only_linkedin_when_resume_text_is_none(self):
+    async def test_returns_only_linkedin_when_resume_text_is_none(self):
         from langgraph.types import Send
         from src.agents.master_workflow import fan_out
 
@@ -202,12 +220,12 @@ class TestFanOut:
             default_resume_text=None,  # no extracted text
             default_resume_name="My Resume",
         )
-        sends = fan_out(state)
+        sends = await fan_out(state)
 
         assert len(sends) == 1
         assert sends[0].node == "linkedin_branch"
 
-    def test_returns_only_linkedin_when_resume_id_is_none(self):
+    async def test_returns_only_linkedin_when_resume_id_is_none(self):
         from langgraph.types import Send
         from src.agents.master_workflow import fan_out
 
@@ -217,22 +235,22 @@ class TestFanOut:
             default_resume_text="Some text",  # text present but no id
             default_resume_name=None,
         )
-        sends = fan_out(state)
+        sends = await fan_out(state)
 
         assert len(sends) == 1
         assert sends[0].node == "linkedin_branch"
 
-    def test_linkedin_branch_send_carries_job_id(self):
+    async def test_linkedin_branch_send_carries_job_id(self):
         from langgraph.types import Send
         from src.agents.master_workflow import fan_out
 
         state = _make_state(job_id=55, default_resume_id=None, default_resume_text=None, default_resume_name=None)
-        sends = fan_out(state)
+        sends = await fan_out(state)
 
         linkedin_send = sends[0]
         assert linkedin_send.arg["job_id"] == 55
 
-    def test_description_passed_to_resume_branch(self):
+    async def test_description_passed_to_resume_branch(self):
         from src.agents.master_workflow import fan_out
 
         state = _make_state(
@@ -247,11 +265,11 @@ class TestFanOut:
                 "location": None,
             },
         )
-        sends = fan_out(state)
+        sends = await fan_out(state)
         resume_send = next(s for s in sends if s.node == "resume_branch")
         assert resume_send.arg["description"] == "Build things."
 
-    def test_description_is_none_when_extracted_is_none(self):
+    async def test_description_is_none_when_extracted_is_none(self):
         from src.agents.master_workflow import fan_out
 
         state = _make_state(
@@ -261,7 +279,7 @@ class TestFanOut:
             default_resume_name="Resume",
             extracted=None,
         )
-        sends = fan_out(state)
+        sends = await fan_out(state)
         resume_send = next(s for s in sends if s.node == "resume_branch")
         assert resume_send.arg["description"] is None
 
@@ -271,64 +289,65 @@ class TestFanOut:
 # ---------------------------------------------------------------------------
 
 class TestResolveDefaultResume:
-    async def test_finds_default_resume(self, test_db):
-        conn = sqlite3.connect(test_db)
-        conn.execute(
-            "INSERT INTO resumes (name, extracted_text, is_default) VALUES (?, ?, ?)",
-            ("My Resume", "Full resume text here.", 1),
-        )
-        conn.commit()
-        conn.close()
+    async def test_finds_default_resume(self, migrated_db_with_resumes):
+        import aiosqlite
+        async with aiosqlite.connect(migrated_db_with_resumes) as conn:
+            await conn.execute(
+                "INSERT INTO resumes (name, extracted_text, is_default) VALUES (?, ?, ?)",
+                ("My Resume", "Full resume text here.", 1),
+            )
+            await conn.commit()
 
         from src.agents.master_workflow import resolve_default_resume
 
-        state = _make_state()
+        # job_id=None avoids FK violation; job is not yet resolved at this node
+        state = _make_state(job_id=None)
         result = await resolve_default_resume(state)
 
         assert result["default_resume_id"] is not None
         assert result["default_resume_text"] == "Full resume text here."
         assert result["default_resume_name"] == "My Resume"
 
-    async def test_returns_none_fields_when_no_default_resume(self, test_db):
+    async def test_returns_none_fields_when_no_default_resume(self, migrated_db_with_resumes):
         from src.agents.master_workflow import resolve_default_resume
 
-        state = _make_state()
+        state = _make_state(job_id=None)
         result = await resolve_default_resume(state)
 
         assert result["default_resume_id"] is None
         assert result["default_resume_text"] is None
         assert result["default_resume_name"] is None
 
-    async def test_returns_none_when_default_resume_has_no_text(self, test_db):
-        conn = sqlite3.connect(test_db)
-        conn.execute(
-            "INSERT INTO resumes (name, extracted_text, is_default) VALUES (?, ?, ?)",
-            ("My Resume", None, 1),
-        )
-        conn.commit()
-        conn.close()
+    async def test_returns_none_when_default_resume_has_no_text(self, migrated_db_with_resumes):
+        import aiosqlite
+        async with aiosqlite.connect(migrated_db_with_resumes) as conn:
+            await conn.execute(
+                "INSERT INTO resumes (name, extracted_text, is_default) VALUES (?, ?, ?)",
+                ("My Resume", None, 1),
+            )
+            await conn.commit()
 
         from src.agents.master_workflow import resolve_default_resume
 
-        state = _make_state()
+        state = _make_state(job_id=None)
         result = await resolve_default_resume(state)
 
         assert result["default_resume_id"] is None
         assert result["default_resume_text"] is None
         assert result["default_resume_name"] is None
 
-    async def test_ignores_non_default_resumes(self, test_db):
-        conn = sqlite3.connect(test_db)
-        conn.execute(
-            "INSERT INTO resumes (name, extracted_text, is_default) VALUES (?, ?, ?)",
-            ("Not Default", "Some text.", 0),
-        )
-        conn.commit()
-        conn.close()
+    async def test_ignores_non_default_resumes(self, migrated_db_with_resumes):
+        import aiosqlite
+        async with aiosqlite.connect(migrated_db_with_resumes) as conn:
+            await conn.execute(
+                "INSERT INTO resumes (name, extracted_text, is_default) VALUES (?, ?, ?)",
+                ("Not Default", "Some text.", 0),
+            )
+            await conn.commit()
 
         from src.agents.master_workflow import resolve_default_resume
 
-        state = _make_state()
+        state = _make_state(job_id=None)
         result = await resolve_default_resume(state)
 
         assert result["default_resume_id"] is None
@@ -371,3 +390,28 @@ class TestRunMasterWorkflow:
 
         assert result["job_id"] is None
         assert result["error"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Integration test: master-level instrumentation writes pipeline_events rows
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_resolve_default_resume_writes_pipeline_events(migrated_db_with_resumes):
+    """Calling resolve_default_resume writes a 'master/resolve_default_resume' row."""
+    import aiosqlite
+    from src.agents.master_workflow import resolve_default_resume
+
+    state = _make_state(workflow_run_id="master-integration-1", job_id=None)
+    await resolve_default_resume(state)
+
+    async with aiosqlite.connect(migrated_db_with_resumes) as conn:
+        conn.row_factory = aiosqlite.Row
+        cursor = await conn.execute(
+            "SELECT graph, node_name FROM pipeline_events "
+            "WHERE workflow_run_id='master-integration-1'"
+        )
+        rows = await cursor.fetchall()
+
+    assert len(rows) >= 1
+    assert any(r["graph"] == "master" and r["node_name"] == "resolve_default_resume" for r in rows)

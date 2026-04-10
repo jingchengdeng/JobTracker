@@ -1,15 +1,18 @@
 import logging
+import uuid
 from typing import TypedDict
 
 from langgraph.graph import StateGraph, END
 from langgraph.types import Send
 
+from src.agents.pipeline_tracking import track_node, TrackBehavior
 from src.db import get_connection
 
 logger = logging.getLogger(__name__)
 
 
 class MasterWorkflowState(TypedDict):
+    workflow_run_id: str
     # Extraction inputs (matches ExtractionState field names)
     raw_text: str
     url: str
@@ -26,6 +29,7 @@ class MasterWorkflowState(TypedDict):
     default_resume_name: str | None
 
 
+@track_node("master", "resolve_default_resume", TrackBehavior.SINGLE_SHOT)
 async def resolve_default_resume(state: MasterWorkflowState) -> dict:
     """Query DB for the default resume (is_default=1)."""
     async with get_connection() as conn:
@@ -47,19 +51,21 @@ async def resolve_default_resume(state: MasterWorkflowState) -> dict:
     }
 
 
-def _should_fan_out(state: MasterWorkflowState) -> str:
+async def _should_fan_out(state: MasterWorkflowState) -> str:
     """Conditional edge after insert_job: stop if no valid job_id or error."""
     if not state.get("job_id") or state.get("error"):
         return "end"
     return "resolve_default_resume"
 
 
-def fan_out(state: MasterWorkflowState) -> list[Send]:
+async def fan_out(state: MasterWorkflowState) -> list[Send]:
     """Dispatch parallel branches via Send()."""
+    workflow_run_id = state.get("workflow_run_id")
     sends = []
     # LinkedIn branch always runs
     sends.append(Send("linkedin_branch", {
         "job_id": state["job_id"],
+        "workflow_run_id": workflow_run_id,
     }))
     # Resume branch only if default resume exists and has text
     if state.get("default_resume_id") and state.get("default_resume_text"):
@@ -69,6 +75,7 @@ def fan_out(state: MasterWorkflowState) -> list[Send]:
             "resume_text": state["default_resume_text"],
             "resume_name": state["default_resume_name"],
             "description": state.get("extracted", {}).get("description") if state.get("extracted") else None,
+            "workflow_run_id": workflow_run_id,
         }))
     return sends
 
@@ -130,13 +137,15 @@ def build_master_graph() -> StateGraph:
         _handle_failure,
     )
 
+    fail_node = track_node("master", "fail_node", TrackBehavior.SINGLE_SHOT)(_handle_failure)
+
     graph = StateGraph(MasterWorkflowState)
 
     # Extraction nodes
     graph.add_node("extract_fields", extract_fields)
     graph.add_node("validate_fields", validate_fields)
     graph.add_node("insert_job", insert_job)
-    graph.add_node("fail", _handle_failure)
+    graph.add_node("fail", fail_node)
 
     # Post-insert nodes
     graph.add_node("resolve_default_resume", resolve_default_resume)
@@ -177,9 +186,12 @@ def build_master_graph() -> StateGraph:
 _compiled_master_graph = build_master_graph().compile()
 
 
-async def run_master_workflow(raw_text: str, url: str) -> dict:
+async def run_master_workflow(
+    raw_text: str, url: str, workflow_run_id: str | None = None,
+) -> dict:
     """Run the full master workflow. Returns {job_id, error}."""
     initial_state: MasterWorkflowState = {
+        "workflow_run_id": workflow_run_id or str(uuid.uuid4()),
         "raw_text": raw_text,
         "url": url,
         "extracted": None,
