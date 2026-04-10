@@ -258,27 +258,36 @@ def track_node(graph: str, node_name: str, behavior: TrackBehavior = TrackBehavi
             try:
                 result = await fn(state)
             except Exception as exc:
+                duration_ms = int((time.monotonic() - started) * 1000)
                 err_msg = _format_pipeline_error(exc)
                 tb_str = "".join(tb_module.format_tb(exc.__traceback__)[-10:])
-                await _mark_failed(row_id, err_msg, tb_str, started)
-                await bus.publish(PipelineEvent(
-                    job_id=state.get("job_id"),
-                    graph=graph,
-                    workflow_run_id=workflow_run_id,
-                    node_name=node_name,
-                    status="failed",
-                    attempt=attempt,
-                    version=version,
-                    error=err_msg,
-                    traceback=tb_str,
-                    duration_ms=int((time.monotonic() - started) * 1000),
-                    round_number=state.get("round_number", 0),
-                ))
+                try:
+                    await _mark_failed(row_id, err_msg, tb_str, duration_ms)
+                    await bus.publish(PipelineEvent(
+                        job_id=state.get("job_id"),
+                        graph=graph,
+                        workflow_run_id=workflow_run_id,
+                        node_name=node_name,
+                        status="failed",
+                        attempt=attempt,
+                        version=version,
+                        error=err_msg,
+                        traceback=tb_str,
+                        duration_ms=duration_ms,
+                        round_number=state.get("round_number", 0),
+                    ))
+                except Exception:
+                    logger.exception(
+                        "track_node: failed to record failure for %s/%s "
+                        "(original error will still propagate)",
+                        graph, node_name,
+                    )
                 raise
 
+            duration_ms = int((time.monotonic() - started) * 1000)
             if isinstance(result, dict) and result.get("error"):
                 err_msg = result["error"]
-                await _mark_failed(row_id, err_msg, "", started)
+                await _mark_failed(row_id, err_msg, "", duration_ms)
                 await bus.publish(PipelineEvent(
                     job_id=state.get("job_id"),
                     graph=graph,
@@ -288,7 +297,7 @@ def track_node(graph: str, node_name: str, behavior: TrackBehavior = TrackBehavi
                     attempt=attempt,
                     version=version,
                     error=err_msg,
-                    duration_ms=int((time.monotonic() - started) * 1000),
+                    duration_ms=duration_ms,
                     round_number=state.get("round_number", 0),
                 ))
                 return result
@@ -297,7 +306,7 @@ def track_node(graph: str, node_name: str, behavior: TrackBehavior = TrackBehavi
             if isinstance(result, dict):
                 new_job_id = result.get("job_id") if result.get("job_id") else None
             await _mark_completed(
-                row_id, workflow_run_id, started,
+                row_id, workflow_run_id, duration_ms,
                 backfill_job_id=new_job_id if node_name == "insert_job" else None,
             )
             await bus.publish(PipelineEvent(
@@ -308,7 +317,7 @@ def track_node(graph: str, node_name: str, behavior: TrackBehavior = TrackBehavi
                 status="completed",
                 attempt=attempt,
                 version=version,
-                duration_ms=int((time.monotonic() - started) * 1000),
+                duration_ms=duration_ms,
                 round_number=state.get("round_number", 0),
             ))
             return result
@@ -382,10 +391,9 @@ async def _pre_hook(
 
 
 async def _mark_completed(
-    row_id: int, workflow_run_id: str, started: float,
+    row_id: int, workflow_run_id: str, duration_ms: int,
     backfill_job_id: int | None = None,
 ) -> None:
-    duration_ms = int((time.monotonic() - started) * 1000)
     async with get_connection() as conn:
         if backfill_job_id is not None:
             await conn.execute(
@@ -402,8 +410,7 @@ async def _mark_completed(
         await conn.commit()
 
 
-async def _mark_failed(row_id: int, error: str, traceback: str, started: float) -> None:
-    duration_ms = int((time.monotonic() - started) * 1000)
+async def _mark_failed(row_id: int, error: str, traceback: str, duration_ms: int) -> None:
     async with get_connection() as conn:
         await conn.execute(
             "UPDATE pipeline_events SET status='failed', error=?, traceback=?, "
