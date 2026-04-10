@@ -4,7 +4,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 
-from fastapi import WebSocket, WebSocketDisconnect
+from fastapi import HTTPException, WebSocket, WebSocketDisconnect
 
 from src.agents.interview_db import load_session, load_turns
 from src.agents.audio_pipeline import process_audio_turn, synthesize_speech
@@ -33,7 +33,7 @@ async def interview_ws_handler(websocket: WebSocket, session_id: int):
     # Validate session
     try:
         session = await load_session(session_id)
-    except ValueError:
+    except HTTPException:
         await websocket.send_json({"type": "error", "code": "session_not_found", "message": "Session not found"})
         await websocket.close()
         return
