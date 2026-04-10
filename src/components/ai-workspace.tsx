@@ -6,12 +6,14 @@ import { cn } from "@/lib/utils";
 import { ResumeTailorTab } from "@/components/resume-tailor-tab";
 import { LinkedinTab } from "@/components/linkedin-tab";
 import { MockInterviewTab } from "@/components/mock-interview-tab";
+import { PipelineTab } from "@/components/pipeline-tab";
 import type { Job } from "@/lib/types";
 
 const tabs = [
   { id: "resume", label: "Resume Tailor" },
   { id: "linkedin", label: "LinkedIn Search" },
   { id: "interview", label: "Mock Interview" },
+  { id: "pipeline", label: "Pipeline" },
 ] as const;
 
 type TabId = (typeof tabs)[number]["id"];
@@ -65,6 +67,7 @@ export function AiWorkspace({ job, onClose }: AiWorkspaceProps) {
         {activeTab === "resume" && <ResumeTailorTab job={job} />}
         {activeTab === "linkedin" && <LinkedinTab job={job} />}
         {activeTab === "interview" && <MockInterviewTab job={job} />}
+        {activeTab === "pipeline" && <PipelineTab job={job} />}
       </div>
     </div>
   );
