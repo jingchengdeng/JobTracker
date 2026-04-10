@@ -150,28 +150,6 @@ def test_track_node_rejects_sync_function_at_decoration_time():
             return {}
 
 
-@pytest.fixture
-async def migrated_db(monkeypatch):
-    """Fresh SQLite file with pipeline_events table."""
-    import os
-    import tempfile
-    from src.db_migrations import PIPELINE_EVENTS_DDL
-    import aiosqlite
-
-    fd, path = tempfile.mkstemp(suffix=".db")
-    os.close(fd)
-    monkeypatch.setenv("JOBTRACKER_DB_PATH", path)
-    async with aiosqlite.connect(path) as conn:
-        # Minimal FK targets
-        await conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY)")
-        await conn.execute(
-            "CREATE TABLE ai_runs (id INTEGER PRIMARY KEY, job_id INTEGER, resume_id INTEGER)"
-        )
-        await conn.executescript(PIPELINE_EVENTS_DDL)
-        await conn.commit()
-    yield path
-    os.unlink(path)
-
 
 @pytest.mark.asyncio
 async def test_track_node_single_shot_writes_running_then_completed(migrated_db):

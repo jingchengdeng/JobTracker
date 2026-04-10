@@ -36,6 +36,7 @@ class ExtractionState(TypedDict):
     retry_count: int
     job_id: int | None
     error: str | None
+    workflow_run_id: str
 
 
 def validate_extraction(data: LinkedInJobExtraction) -> list[str]:

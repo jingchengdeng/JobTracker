@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import uuid
 
 import httpx
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -13,6 +14,7 @@ from src.agents.extraction_schemas import (
     ExtractionState,
     validate_extraction,
 )
+from src.agents.pipeline_tracking import track_node, TrackBehavior
 
 NEXTJS_JOBS_URL = "http://localhost:3000/api/jobs"
 
@@ -110,6 +112,7 @@ GENERAL RULES:
 - Do not invent or infer data that is not present in the raw text."""
 
 
+@track_node("master", "extract_fields", TrackBehavior.RETRY_IN_PLACE)
 async def extract_fields(state: ExtractionState) -> ExtractionState:
     llm = await get_linkedin_model()
     structured_llm = llm.with_structured_output(LinkedInJobExtraction, method="function_calling")
@@ -143,6 +146,7 @@ async def extract_fields(state: ExtractionState) -> ExtractionState:
     }
 
 
+@track_node("master", "validate_fields", TrackBehavior.RETRY_IN_PLACE)
 async def validate_fields(state: ExtractionState) -> ExtractionState:
     extracted = state.get("extracted") or {}
     data = LinkedInJobExtraction.model_construct(**extracted)
@@ -165,6 +169,7 @@ async def _handle_failure(state: ExtractionState) -> ExtractionState:
     return {**state, "error": error_msg}
 
 
+@track_node("master", "insert_job", TrackBehavior.SINGLE_SHOT)
 async def insert_job(state: ExtractionState) -> ExtractionState:
     extracted = state.get("extracted") or {}
     body = {
@@ -221,7 +226,9 @@ def build_extraction_graph() -> StateGraph:
 _compiled_extraction_graph = build_extraction_graph().compile()
 
 
-async def run_extraction_pipeline(raw_text: str, url: str) -> dict:
+async def run_extraction_pipeline(
+    raw_text: str, url: str, workflow_run_id: str | None = None,
+) -> dict:
     initial_state: ExtractionState = {
         "raw_text": raw_text,
         "url": url,
@@ -230,6 +237,7 @@ async def run_extraction_pipeline(raw_text: str, url: str) -> dict:
         "retry_count": 0,
         "job_id": None,
         "error": None,
+        "workflow_run_id": workflow_run_id or str(uuid.uuid4()),
     }
 
     try:
