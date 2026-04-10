@@ -64,3 +64,9 @@ docs/superpowers/
 
 # worktrees
 .worktrees/
+
+# local tooling
+.codex
+.codex/
+.cursor-plugin/
+.playwright-mcp/
