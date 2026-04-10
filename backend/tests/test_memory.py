@@ -76,10 +76,10 @@ async def test_get_current_round(test_db):
     conn.commit()
     conn.close()
 
-    assert await get_current_round(1) == 1
+    assert await get_current_round(1) == 0
 
     await save_message(1, "user", "Hello", 1)
-    assert await get_current_round(1) == 2
+    assert await get_current_round(1) == 1
 
 
 async def test_get_conversation_summary_none(test_db):

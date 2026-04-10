@@ -91,42 +91,41 @@ async def _run_job(
         collection = await collection_for_signature(
             job.target_signature, provider=provider, model=model
         )
+
+        resumes = await _fetch_resumes(resume_ids)
+        job.total = len(resumes)
+
+        for r in resumes:
+            job.current_resume_id = r["id"]
+            if not r["extracted_text"]:
+                await mark_resume_failed(r["id"], "No extracted text on file")
+                job.failed.append({"resume_id": r["id"], "error": "No extracted text on file"})
+                continue
+            try:
+                async def op(resume=r):
+                    await index_resume_into(collection, resume["id"], resume["name"], resume["extracted_text"])
+                await with_retry(op, retries=3, backoff=(1.0, 2.0, 4.0))
+                await mark_resume_ok(r["id"], job.target_signature)
+                job.succeeded.append(r["id"])
+            except Exception as exc:
+                logger.warning("Resume %s reindex failed: %s", r["id"], exc)
+                await mark_resume_failed(r["id"], str(exc))
+                job.failed.append({"resume_id": r["id"], "error": str(exc)})
+
+        job.current_resume_id = None
+        job.status = "completed"
+        job.completed_at = _now_iso()
+
+        await _maybe_flip_pointer(
+            job.target_signature,
+            was_full=resume_ids is None,
+            had_failures=bool(job.failed),
+        )
     except Exception as exc:
-        logger.exception("Failed to initialize target collection")
+        logger.exception("Reindex job %s failed unexpectedly", job.job_id)
         job.status = "failed"
         job.completed_at = _now_iso()
-        job.failed.append({"resume_id": None, "error": str(exc)})
-        return
-
-    resumes = await _fetch_resumes(resume_ids)
-    job.total = len(resumes)
-
-    for r in resumes:
-        job.current_resume_id = r["id"]
-        if not r["extracted_text"]:
-            await mark_resume_failed(r["id"], "No extracted text on file")
-            job.failed.append({"resume_id": r["id"], "error": "No extracted text on file"})
-            continue
-        try:
-            async def op(resume=r):
-                await index_resume_into(collection, resume["id"], resume["name"], resume["extracted_text"])
-            await with_retry(op, retries=3, backoff=(1.0, 2.0, 4.0))
-            await mark_resume_ok(r["id"], job.target_signature)
-            job.succeeded.append(r["id"])
-        except Exception as exc:
-            logger.warning("Resume %s reindex failed: %s", r["id"], exc)
-            await mark_resume_failed(r["id"], str(exc))
-            job.failed.append({"resume_id": r["id"], "error": str(exc)})
-
-    job.current_resume_id = None
-    job.status = "completed"
-    job.completed_at = _now_iso()
-
-    await _maybe_flip_pointer(
-        job.target_signature,
-        was_full=resume_ids is None,
-        had_failures=bool(job.failed),
-    )
+        job.failed.append({"resume_id": job.current_resume_id, "error": str(exc)})
 
 
 async def _maybe_flip_pointer(target_signature: str, *, was_full: bool, had_failures: bool) -> None:

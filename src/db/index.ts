@@ -10,6 +10,7 @@ const client = createClient({ url: `file:${dbPath}` });
 export const dbReady = (async () => {
   await client.execute("PRAGMA journal_mode = WAL");
   await client.execute("PRAGMA foreign_keys = ON");
+  await client.execute("PRAGMA busy_timeout = 5000");
 })();
 
 export const db = drizzle(client, { schema });

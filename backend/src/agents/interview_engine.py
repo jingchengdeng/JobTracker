@@ -66,10 +66,13 @@ async def run_planning(session_id: int) -> None:
         f"The opening_prompt should be a single conversational question to start the interview."
     )
 
-    plan = await structured_llm.ainvoke([
-        SystemMessage(content=system),
-        HumanMessage(content=prompt),
-    ])
+    plan = await asyncio.wait_for(
+        structured_llm.ainvoke([
+            SystemMessage(content=system),
+            HumanMessage(content=prompt),
+        ]),
+        timeout=60.0,
+    )
 
     await save_plan(session_id, plan.model_dump())
     await save_turn(session_id, "interviewer", plan.opening_prompt)
@@ -109,19 +112,25 @@ async def process_interview_turn(session_id: int, transcript: str) -> TurnRespon
 
     try:
         structured_llm = llm.with_structured_output(TurnResponse, method="function_calling")
-        turn_response = await structured_llm.ainvoke([
-            SystemMessage(content=system),
-            HumanMessage(content=prompt),
-        ])
+        turn_response = await asyncio.wait_for(
+            structured_llm.ainvoke([
+                SystemMessage(content=system),
+                HumanMessage(content=prompt),
+            ]),
+            timeout=30.0,
+        )
     except (ValidationError, Exception) as exc:
         logger.warning("Structured output failed, using fallback: %s", exc)
-        fallback = await llm.ainvoke([
-            SystemMessage(content=system),
-            HumanMessage(content=(
-                f"{history}\n\nBriefly acknowledge the candidate's last answer, "
-                f"then ask ONE follow-up question."
-            )),
-        ])
+        fallback = await asyncio.wait_for(
+            llm.ainvoke([
+                SystemMessage(content=system),
+                HumanMessage(content=(
+                    f"{history}\n\nBriefly acknowledge the candidate's last answer, "
+                    f"then ask ONE follow-up question."
+                )),
+            ]),
+            timeout=30.0,
+        )
         turn_response = TurnResponse(
             next_action="follow_up",
             current_topic_covered=False,
@@ -177,10 +186,13 @@ async def run_scoring(session_id: int) -> None:
         f"questions where the candidate's answer was weak or incorrect."
     )
 
-    score = await structured_llm.ainvoke([
-        SystemMessage(content=system),
-        HumanMessage(content=prompt),
-    ])
+    score = await asyncio.wait_for(
+        structured_llm.ainvoke([
+            SystemMessage(content=system),
+            HumanMessage(content=prompt),
+        ]),
+        timeout=60.0,
+    )
 
     await save_results(session_id, score.model_dump())
     await update_session_status(session_id, "completed")

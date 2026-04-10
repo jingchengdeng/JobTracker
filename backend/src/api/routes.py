@@ -11,8 +11,8 @@ from src.agents.orchestrator import run_pipeline
 from src.agents.classifier import classify_followup
 from src.memory.conversation import (
     save_message,
+    start_new_round,
     get_recent_messages,
-    get_current_round,
     get_conversation_summary,
     summarize_old_rounds,
 )
@@ -214,8 +214,7 @@ async def send_message(run_id: int, req: SendMessageRequest):
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
 
-    round_num = await get_current_round(run_id)
-    await save_message(run_id, "user", req.content, round_num)
+    round_num = await start_new_round(run_id, "user", req.content)
 
     async with get_connection() as conn:
         await conn.execute("UPDATE ai_runs SET status = 'running' WHERE id = ?", (run_id,))

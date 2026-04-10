@@ -15,21 +15,24 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid resume ID" }, { status: 400 });
   }
 
-  const [resume] = await db
-    .select({ id: resumes.id })
-    .from(resumes)
-    .where(eq(resumes.id, resumeId));
+  const found = await db.transaction(async (tx) => {
+    const [resume] = await tx
+      .select({ id: resumes.id })
+      .from(resumes)
+      .where(eq(resumes.id, resumeId));
 
-  if (!resume) {
-    return NextResponse.json({ error: "Resume not found" }, { status: 404 });
-  }
+    if (!resume) return false;
 
-  await db.transaction(async (tx) => {
     await tx.update(resumes).set({ isDefault: 0 });
     await tx.update(resumes)
       .set({ isDefault: 1 })
       .where(eq(resumes.id, resumeId));
+    return true;
   });
+
+  if (!found) {
+    return NextResponse.json({ error: "Resume not found" }, { status: 404 });
+  }
 
   return NextResponse.json({ ok: true, resumeId });
 }

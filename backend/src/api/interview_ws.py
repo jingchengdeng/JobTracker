@@ -16,6 +16,8 @@ HEARTBEAT_TIMEOUT = 45
 MAX_TURNS_PER_SESSION = 60
 MIN_AUDIO_INTERVAL = 2.0
 
+_active_sessions: dict[int, asyncio.Event] = {}
+
 
 @dataclass
 class ConnectionState:
@@ -30,15 +32,27 @@ class ConnectionState:
 async def interview_ws_handler(websocket: WebSocket, session_id: int):
     await websocket.accept()
 
+    # Prevent duplicate connections to the same session
+    if session_id in _active_sessions:
+        await websocket.send_json({
+            "type": "error", "code": "already_connected",
+            "message": "Another tab is already connected to this session",
+        })
+        await websocket.close()
+        return
+    _active_sessions[session_id] = asyncio.Event()
+
     # Validate session
     try:
         session = await load_session(session_id)
     except HTTPException:
+        del _active_sessions[session_id]
         await websocket.send_json({"type": "error", "code": "session_not_found", "message": "Session not found"})
         await websocket.close()
         return
 
     if session["status"] not in ("active", "paused", "planning"):
+        del _active_sessions[session_id]
         await websocket.send_json({
             "type": "error", "code": "session_expired",
             "message": f"Session is {session['status']}, cannot connect",
@@ -109,6 +123,7 @@ async def interview_ws_handler(websocket: WebSocket, session_id: int):
     except Exception as exc:
         logger.exception("WebSocket error for session %s: %s", session_id, exc)
     finally:
+        _active_sessions.pop(session_id, None)
         heartbeat_task.cancel()
         if state.current_task:
             state.current_task.cancel()
@@ -135,35 +150,39 @@ async def _handle_audio(websocket: WebSocket, state: ConnectionState, audio_byte
     state.is_processing = True
     state.last_audio_time = now
 
-    try:
-        turn_response, transcript = await process_audio_turn(state.session_id, audio_bytes, voice)
-
-        # Send transcript back to client
-        if transcript:
-            await websocket.send_json({"type": "transcript", "text": transcript})
-
-        # Send interviewer text
-        await websocket.send_json({
-            "type": "interviewer_text", "delta": turn_response.interviewer_message, "done": True,
-        })
-
-        # Stream TTS audio (graceful degradation if TTS unavailable)
+    async def _process():
         try:
-            await websocket.send_json({"type": "audio_start"})
-            async for chunk in synthesize_speech(turn_response.interviewer_message, voice):
-                await websocket.send_bytes(chunk)
-            await websocket.send_json({"type": "audio_end"})
-        except Exception as tts_exc:
-            logger.warning("TTS failed, text-only fallback: %s", tts_exc)
-            await websocket.send_json({"type": "audio_end"})
+            turn_response, transcript = await process_audio_turn(state.session_id, audio_bytes, voice)
 
-    except asyncio.TimeoutError:
-        await websocket.send_json({"type": "error", "code": "timeout", "message": "Processing timed out"})
-    except Exception as exc:
-        logger.exception("Turn processing failed: %s", exc)
-        await websocket.send_json({"type": "error", "code": "processing_failed", "message": str(exc)[:200]})
-    finally:
-        state.is_processing = False
+            if transcript:
+                await websocket.send_json({"type": "transcript", "text": transcript})
+
+            await websocket.send_json({
+                "type": "interviewer_text", "delta": turn_response.interviewer_message, "done": True,
+            })
+
+            try:
+                await websocket.send_json({"type": "audio_start"})
+                async for chunk in synthesize_speech(turn_response.interviewer_message, voice):
+                    await websocket.send_bytes(chunk)
+                await websocket.send_json({"type": "audio_end"})
+            except Exception as tts_exc:
+                logger.warning("TTS failed, text-only fallback: %s", tts_exc)
+                await websocket.send_json({"type": "audio_end"})
+
+        except asyncio.CancelledError:
+            raise
+        except asyncio.TimeoutError:
+            await websocket.send_json({"type": "error", "code": "timeout", "message": "Processing timed out"})
+        except Exception as exc:
+            logger.exception("Turn processing failed: %s", exc)
+            await websocket.send_json({"type": "error", "code": "processing_failed", "message": str(exc)[:200]})
+        finally:
+            state.is_processing = False
+            state.current_task = None
+
+    state.current_task = asyncio.create_task(_process())
+    await state.current_task
 
 
 async def _handle_text_input(websocket: WebSocket, state: ConnectionState, text: str, voice: str):
@@ -182,38 +201,43 @@ async def _handle_text_input(websocket: WebSocket, state: ConnectionState, text:
 
     state.is_processing = True
 
-    # Echo the candidate's text back so the frontend can display it immediately
     await websocket.send_json({"type": "transcript", "text": text.strip()})
 
-    try:
-        from src.agents.interview_engine import process_interview_turn
-
-        turn_response = await asyncio.wait_for(
-            process_interview_turn(state.session_id, text),
-            timeout=30.0,
-        )
-
-        await websocket.send_json({
-            "type": "interviewer_text", "delta": turn_response.interviewer_message, "done": True,
-        })
-
-        # TTS with graceful degradation
+    async def _process():
         try:
-            await websocket.send_json({"type": "audio_start"})
-            async for chunk in synthesize_speech(turn_response.interviewer_message, voice):
-                await websocket.send_bytes(chunk)
-            await websocket.send_json({"type": "audio_end"})
-        except Exception as tts_exc:
-            logger.warning("TTS failed, text-only fallback: %s", tts_exc)
-            await websocket.send_json({"type": "audio_end"})
+            from src.agents.interview_engine import process_interview_turn
 
-    except asyncio.TimeoutError:
-        await websocket.send_json({"type": "error", "code": "timeout", "message": "Processing timed out"})
-    except Exception as exc:
-        logger.exception("Text turn failed: %s", exc)
-        await websocket.send_json({"type": "error", "code": "processing_failed", "message": str(exc)[:200]})
-    finally:
-        state.is_processing = False
+            turn_response = await asyncio.wait_for(
+                process_interview_turn(state.session_id, text),
+                timeout=30.0,
+            )
+
+            await websocket.send_json({
+                "type": "interviewer_text", "delta": turn_response.interviewer_message, "done": True,
+            })
+
+            try:
+                await websocket.send_json({"type": "audio_start"})
+                async for chunk in synthesize_speech(turn_response.interviewer_message, voice):
+                    await websocket.send_bytes(chunk)
+                await websocket.send_json({"type": "audio_end"})
+            except Exception as tts_exc:
+                logger.warning("TTS failed, text-only fallback: %s", tts_exc)
+                await websocket.send_json({"type": "audio_end"})
+
+        except asyncio.CancelledError:
+            raise
+        except asyncio.TimeoutError:
+            await websocket.send_json({"type": "error", "code": "timeout", "message": "Processing timed out"})
+        except Exception as exc:
+            logger.exception("Text turn failed: %s", exc)
+            await websocket.send_json({"type": "error", "code": "processing_failed", "message": str(exc)[:200]})
+        finally:
+            state.is_processing = False
+            state.current_task = None
+
+    state.current_task = asyncio.create_task(_process())
+    await state.current_task
 
 
 async def _heartbeat_loop(websocket: WebSocket, state: ConnectionState):

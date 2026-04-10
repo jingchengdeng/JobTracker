@@ -48,7 +48,7 @@ export const jobs = sqliteTable("jobs", {
 
 export const goals = sqliteTable("goals", {
   id: integer().primaryKey({ autoIncrement: true }),
-  type: text({ enum: GOAL_TYPES }).notNull(),
+  type: text({ enum: GOAL_TYPES }).notNull().unique(),
   target: integer().notNull(),
   periodStart: text("period_start").notNull(),
   createdAt: text("created_at")
@@ -172,6 +172,7 @@ export const interviewResults = sqliteTable("interview_results", {
   id: integer().primaryKey({ autoIncrement: true }),
   sessionId: integer("session_id")
     .notNull()
+    .unique()
     .references(() => interviewSessions.id),
   overallScore: integer("overall_score").notNull(),
   dimensionScoresJson: text("dimension_scores_json").notNull(),

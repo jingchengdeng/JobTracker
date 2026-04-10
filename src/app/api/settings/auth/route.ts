@@ -37,7 +37,9 @@ async function readStore(): Promise<AuthStore> {
 
 async function writeStore(store: AuthStore) {
   await ensureFile();
-  await fs.writeFile(AUTH_FILE, JSON.stringify(store, null, 2));
+  const tmpFile = AUTH_FILE + ".tmp";
+  await fs.writeFile(tmpFile, JSON.stringify(store, null, 2));
+  await fs.rename(tmpFile, AUTH_FILE);
 }
 
 function sleep(ms: number) {

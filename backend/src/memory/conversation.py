@@ -49,16 +49,29 @@ async def save_message(run_id: int, role: str, content: str, round_number: int):
         await conn.commit()
 
 
+async def start_new_round(run_id: int, role: str, content: str) -> int:
+    """Atomically compute next round number and insert the message. Returns the round number."""
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "INSERT INTO ai_messages (run_id, role, content, round_number) "
+            "VALUES (?, ?, ?, COALESCE((SELECT MAX(round_number) FROM ai_messages WHERE run_id = ?), 0) + 1) "
+            "RETURNING round_number",
+            (run_id, role, content, run_id),
+        )
+        row = await cursor.fetchone()
+        await conn.commit()
+    return row["round_number"]
+
+
 async def get_current_round(run_id: int) -> int:
-    """Get the next round number for a run."""
+    """Get the current max round number for a run (0 if no messages)."""
     async with get_connection() as conn:
         cursor = await conn.execute(
             "SELECT MAX(round_number) as max_round FROM ai_messages WHERE run_id = ?",
             (run_id,),
         )
         row = await cursor.fetchone()
-    current = row["max_round"] if row and row["max_round"] is not None else 0
-    return current + 1
+    return row["max_round"] if row and row["max_round"] is not None else 0
 
 
 async def summarize_old_rounds(run_id: int, llm):

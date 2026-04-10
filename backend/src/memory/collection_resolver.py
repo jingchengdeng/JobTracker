@@ -12,12 +12,14 @@ CHROMADB_HOST = os.environ.get("CHROMADB_HOST", "localhost")
 CHROMADB_PORT = int(os.environ.get("CHROMADB_PORT", "8200"))
 
 _chroma_client: chromadb.AsyncClientAPI | None = None
+_chroma_lock = asyncio.Lock()
 
 
 async def _client() -> chromadb.AsyncClientAPI:
     global _chroma_client
-    if _chroma_client is None:
-        _chroma_client = await chromadb.AsyncHttpClient(host=CHROMADB_HOST, port=CHROMADB_PORT)
+    async with _chroma_lock:
+        if _chroma_client is None:
+            _chroma_client = await chromadb.AsyncHttpClient(host=CHROMADB_HOST, port=CHROMADB_PORT)
     return _chroma_client
 
 

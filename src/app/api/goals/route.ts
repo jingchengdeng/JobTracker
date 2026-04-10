@@ -13,21 +13,24 @@ export async function POST(request: NextRequest) {
   await dbReady;
   const body = await request.json();
 
-  // Upsert: if a goal with the same type exists, update it
-  const [existing] = await db
-    .select()
-    .from(goals)
-    .where(eq(goals.type, body.type));
+  const result = await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(goals)
+      .where(eq(goals.type, body.type));
 
-  if (existing) {
-    const [result] = await db
-      .update(goals)
-      .set({ target: body.target, periodStart: body.periodStart })
-      .where(eq(goals.id, existing.id))
-      .returning();
-    return NextResponse.json(result);
-  }
+    if (existing) {
+      const [updated] = await tx
+        .update(goals)
+        .set({ target: body.target, periodStart: body.periodStart })
+        .where(eq(goals.id, existing.id))
+        .returning();
+      return { row: updated, created: false };
+    }
 
-  const [result] = await db.insert(goals).values(body).returning();
-  return NextResponse.json(result, { status: 201 });
+    const [created] = await tx.insert(goals).values(body).returning();
+    return { row: created, created: true };
+  });
+
+  return NextResponse.json(result.row, { status: result.created ? 201 : 200 });
 }

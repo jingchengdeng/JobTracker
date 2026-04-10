@@ -8,7 +8,7 @@ class TestInterviewModelConfig:
 
         assert "interview" in DEFAULT_MODEL_CONFIG
         assert DEFAULT_MODEL_CONFIG["interview"]["provider"] == "openai"
-        assert DEFAULT_MODEL_CONFIG["interview"]["model"] == "gpt-5.4"
+        assert DEFAULT_MODEL_CONFIG["interview"]["model"] == "gpt-5.4-mini"
 
     def test_migrate_old_config_backfills_interview(self):
         from src.auth.credentials import _migrate_model_config

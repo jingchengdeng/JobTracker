@@ -70,7 +70,9 @@ async function readConfig(): Promise<ModelConfig> {
 async function writeConfig(config: ModelConfig) {
   const dir = path.dirname(CONFIG_FILE);
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(CONFIG_FILE, JSON.stringify(config, null, 2));
+  const tmpFile = CONFIG_FILE + ".tmp";
+  await fs.writeFile(tmpFile, JSON.stringify(config, null, 2));
+  await fs.rename(tmpFile, CONFIG_FILE);
 }
 
 export async function GET() {

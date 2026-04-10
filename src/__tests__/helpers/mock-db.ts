@@ -41,9 +41,9 @@ export function createMockDb() {
     }
   );
 
-  // Async transaction passes chain as tx
-  chain.transaction = vi.fn(async (fn: (tx: any) => Promise<void>) => {
-    await fn(chain);
+  // Async transaction passes chain as tx and returns callback result
+  chain.transaction = vi.fn(async (fn: (tx: any) => Promise<unknown>) => {
+    return await fn(chain);
   });
 
   // Push results that will be returned by sequential awaits
