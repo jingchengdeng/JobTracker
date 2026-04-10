@@ -11,13 +11,26 @@ interleave. If you ever move to a multi-threaded executor or multiple workers,
 replace this bus with an external broker (e.g. Redis pub/sub).
 """
 import asyncio
+import inspect
 import logging
+import time
+import traceback as tb_module
 import weakref
 from collections import deque
 from dataclasses import dataclass, field
+from enum import Enum
+from functools import wraps
 from typing import AsyncIterator
 
+from src.db import get_connection
+
 logger = logging.getLogger(__name__)
+
+
+class TrackBehavior(Enum):
+    SINGLE_SHOT = "single_shot"
+    RETRY_IN_PLACE = "retry_in_place"
+    VERSION_ON_RERUN = "version_on_rerun"
 
 MAX_QUEUE = 100
 
@@ -200,3 +213,201 @@ class PipelineEventBus:
 
 # Module-level singleton. Single-worker deployment is assumed.
 bus = PipelineEventBus()
+
+
+def track_node(graph: str, node_name: str, behavior: TrackBehavior = TrackBehavior.SINGLE_SHOT):
+    """Async decorator that wraps a LangGraph node to emit pipeline_events.
+
+    Assumes the wrapped function is `async def`; asserts this at decoration
+    time via `inspect.iscoroutinefunction`. Reads `workflow_run_id` from the
+    state dict the wrapped function was handed. Never mutates the input
+    state dict.
+    """
+    def decorator(fn):
+        assert inspect.iscoroutinefunction(fn), (
+            f"track_node requires an async function, got sync {fn.__name__}. "
+            "Per the async-only policy, every pipeline function must be async."
+        )
+
+        @wraps(fn)
+        async def wrapper(state):
+            workflow_run_id = state.get("workflow_run_id")
+            if not workflow_run_id:
+                import uuid
+                workflow_run_id = f"fallback-{uuid.uuid4()}"
+                logger.warning(
+                    "track_node: state missing workflow_run_id for %s/%s, "
+                    "synthesised %s", graph, node_name, workflow_run_id,
+                )
+
+            row_id, attempt, version = await _pre_hook(
+                workflow_run_id, graph, node_name, behavior, state,
+            )
+            await bus.publish(PipelineEvent(
+                job_id=state.get("job_id"),
+                graph=graph,
+                workflow_run_id=workflow_run_id,
+                node_name=node_name,
+                status="running",
+                attempt=attempt,
+                version=version,
+                round_number=state.get("round_number", 0),
+            ))
+
+            started = time.monotonic()
+            try:
+                result = await fn(state)
+            except Exception as exc:
+                err_msg = _format_pipeline_error(exc)
+                tb_str = "".join(tb_module.format_tb(exc.__traceback__)[-10:])
+                await _mark_failed(row_id, err_msg, tb_str, started)
+                await bus.publish(PipelineEvent(
+                    job_id=state.get("job_id"),
+                    graph=graph,
+                    workflow_run_id=workflow_run_id,
+                    node_name=node_name,
+                    status="failed",
+                    attempt=attempt,
+                    version=version,
+                    error=err_msg,
+                    traceback=tb_str,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    round_number=state.get("round_number", 0),
+                ))
+                raise
+
+            if isinstance(result, dict) and result.get("error"):
+                err_msg = result["error"]
+                await _mark_failed(row_id, err_msg, "", started)
+                await bus.publish(PipelineEvent(
+                    job_id=state.get("job_id"),
+                    graph=graph,
+                    workflow_run_id=workflow_run_id,
+                    node_name=node_name,
+                    status="failed",
+                    attempt=attempt,
+                    version=version,
+                    error=err_msg,
+                    duration_ms=int((time.monotonic() - started) * 1000),
+                    round_number=state.get("round_number", 0),
+                ))
+                return result
+
+            new_job_id = None
+            if isinstance(result, dict):
+                new_job_id = result.get("job_id") if result.get("job_id") else None
+            await _mark_completed(
+                row_id, workflow_run_id, started,
+                backfill_job_id=new_job_id if node_name == "insert_job" else None,
+            )
+            await bus.publish(PipelineEvent(
+                job_id=new_job_id or state.get("job_id"),
+                graph=graph,
+                workflow_run_id=workflow_run_id,
+                node_name=node_name,
+                status="completed",
+                attempt=attempt,
+                version=version,
+                duration_ms=int((time.monotonic() - started) * 1000),
+                round_number=state.get("round_number", 0),
+            ))
+            return result
+
+        return wrapper
+    return decorator
+
+
+async def _pre_hook(
+    workflow_run_id: str, graph: str, node_name: str,
+    behavior: TrackBehavior, state: dict,
+) -> tuple[int, int, int]:
+    """Insert or update a row and return (row_id, attempt, version)."""
+    async with get_connection() as conn:
+        version = state.get("version", 1)
+        cursor = await conn.execute(
+            "SELECT id, status, attempt FROM pipeline_events "
+            "WHERE workflow_run_id=? AND graph=? AND node_name=? AND version=? "
+            "ORDER BY id DESC LIMIT 1",
+            (workflow_run_id, graph, node_name, version),
+        )
+        latest = await cursor.fetchone()
+        await cursor.close()
+
+        if behavior == TrackBehavior.RETRY_IN_PLACE and latest is not None:
+            if latest["status"] in ("completed", "failed"):
+                new_attempt = latest["attempt"] + 1
+                await conn.execute(
+                    "UPDATE pipeline_events SET status='running', attempt=?, "
+                    "error=NULL, traceback=NULL, "
+                    "started_at=datetime('now'), completed_at=NULL, duration_ms=NULL "
+                    "WHERE id=?",
+                    (new_attempt, latest["id"]),
+                )
+                await conn.commit()
+                return latest["id"], new_attempt, version
+            else:
+                await conn.execute(
+                    "UPDATE pipeline_events SET status='running', "
+                    "started_at=datetime('now') WHERE id=?",
+                    (latest["id"],),
+                )
+                await conn.commit()
+                return latest["id"], latest["attempt"], version
+
+        if behavior == TrackBehavior.VERSION_ON_RERUN and latest is not None:
+            if latest["status"] == "completed":
+                version = latest["attempt"]  # unused for VERSION_ON_RERUN
+                cursor = await conn.execute(
+                    "SELECT MAX(version) FROM pipeline_events "
+                    "WHERE run_id=? AND step_type=?",
+                    (state.get("run_id"), node_name),
+                )
+                (max_v,) = await cursor.fetchone()
+                await cursor.close()
+                version = (max_v or 0) + 1
+
+        cursor = await conn.execute(
+            "INSERT INTO pipeline_events ("
+            "workflow_run_id, job_id, graph, node_name, status, attempt, "
+            "started_at, run_id, step_type, version, round_number"
+            ") VALUES (?, ?, ?, ?, 'running', 1, datetime('now'), ?, ?, ?, ?)",
+            (
+                workflow_run_id, state.get("job_id"), graph, node_name,
+                state.get("run_id"), node_name, version, state.get("round_number", 0),
+            ),
+        )
+        row_id = cursor.lastrowid
+        await conn.commit()
+        return row_id, 1, version
+
+
+async def _mark_completed(
+    row_id: int, workflow_run_id: str, started: float,
+    backfill_job_id: int | None = None,
+) -> None:
+    duration_ms = int((time.monotonic() - started) * 1000)
+    async with get_connection() as conn:
+        if backfill_job_id is not None:
+            await conn.execute(
+                "UPDATE pipeline_events SET job_id=? "
+                "WHERE workflow_run_id=? AND job_id IS NULL",
+                (backfill_job_id, workflow_run_id),
+            )
+        await conn.execute(
+            "UPDATE pipeline_events SET status='completed', "
+            "completed_at=datetime('now'), duration_ms=? "
+            "WHERE id=?",
+            (duration_ms, row_id),
+        )
+        await conn.commit()
+
+
+async def _mark_failed(row_id: int, error: str, traceback: str, started: float) -> None:
+    duration_ms = int((time.monotonic() - started) * 1000)
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE pipeline_events SET status='failed', error=?, traceback=?, "
+            "completed_at=datetime('now'), duration_ms=? WHERE id=?",
+            (error, traceback, duration_ms, row_id),
+        )
+        await conn.commit()
