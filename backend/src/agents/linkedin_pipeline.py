@@ -29,7 +29,7 @@ NOTE_TARGET_CHARS = 280
 
 # --- Pure / deterministic functions ---
 
-def precondition_check(job: dict) -> dict:
+async def precondition_check(job: dict) -> dict:
     """Determine pipeline mode based on available job data."""
     has_description = bool(job.get("description") and job["description"].strip())
     has_title = bool(job.get("title") and job["title"].strip())
@@ -38,7 +38,7 @@ def precondition_check(job: dict) -> dict:
     return {"mode": "basic", "job": job}
 
 
-def build_search_queries(company: str, analysis: dict | None) -> list[dict]:
+async def build_search_queries(company: str, analysis: dict | None) -> list[dict]:
     """Build search queries using site: operator (works on both Brave and Google).
 
     Note: Brave's site: operator breaks when the company name is double-quoted,
@@ -59,7 +59,7 @@ def build_search_queries(company: str, analysis: dict | None) -> list[dict]:
     return base_queries
 
 
-def merge_and_deduplicate(search_results: dict[str, list[dict]]) -> list[dict]:
+async def merge_and_deduplicate(search_results: dict[str, list[dict]]) -> list[dict]:
     """Merge results from multiple searches, dedup by LinkedIn URL."""
     seen: dict[str, dict] = {}
     for tag, people in search_results.items():
@@ -74,7 +74,7 @@ def merge_and_deduplicate(search_results: dict[str, list[dict]]) -> list[dict]:
     return list(seen.values())
 
 
-def filter_and_rank(people: list[dict]) -> list[dict]:
+async def filter_and_rank(people: list[dict]) -> list[dict]:
     """Filter by relevance threshold, cap at max, handle low-confidence fallback."""
     sorted_people = sorted(people, key=lambda p: p["relevance_score"], reverse=True)
     above_threshold = [p for p in sorted_people if p["relevance_score"] >= RELEVANCE_THRESHOLD]
@@ -91,7 +91,7 @@ def filter_and_rank(people: list[dict]) -> list[dict]:
         return result
 
 
-def truncate_note(note: str) -> str:
+async def truncate_note(note: str) -> str:
     """Truncate a connection note to 300 chars at a word boundary."""
     if len(note) <= NOTE_MAX_CHARS:
         return note.strip()
@@ -201,7 +201,7 @@ async def run_generate_notes(people: list[dict], job: dict) -> list[dict]:
     note_map = {n.linkedin_url: n.note for n in result.notes}
     for person in people:
         raw_note = note_map.get(person["linkedin_url"], f"Hi {person['name']}, I'm interested in the {job.get('title', '')} role at {job['company']}.")
-        person["connection_note"] = truncate_note(raw_note)
+        person["connection_note"] = await truncate_note(raw_note)
     return people
 
 
@@ -325,7 +325,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
 
     try:
         # 1. Precondition check
-        check = precondition_check(job)
+        check = await precondition_check(job)
         mode = check["mode"]
 
         # 2. Analyze JD (if full mode)
@@ -354,7 +354,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
             logger.info("Apollo enrichment result: %s", "success" if company_data else "no data")
 
         # 7. Build and run search queries
-        queries = build_search_queries(job["company"], analysis)
+        queries = await build_search_queries(job["company"], analysis)
         search_results: dict[str, list[dict]] = {}
 
         if brave_key:
@@ -409,7 +409,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
 
         # 9. Merge and deduplicate
         total_raw = sum(len(v) for v in search_results.values())
-        merged = merge_and_deduplicate(search_results)
+        merged = await merge_and_deduplicate(search_results)
         logger.info("Merged contacts: %d (from %d raw results across %d queries)", len(merged), total_raw, len(queries))
         if not merged:
             logger.warning(
@@ -422,7 +422,7 @@ async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
             merged = await run_score_relevance(merged, job, analysis)
 
         # 11. Filter and rank
-        ranked = filter_and_rank(merged)
+        ranked = await filter_and_rank(merged)
 
         # 12. Generate connection notes
         if ranked:
