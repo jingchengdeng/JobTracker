@@ -35,6 +35,24 @@ def _ensure_round_number_column() -> None:
         conn.close()
 
 
+def _ensure_resume_columns() -> None:
+    """Add is_default and index tracking columns to resumes if missing. Idempotent."""
+    conn = get_sync_connection()
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(resumes)").fetchall()}
+        if "is_default" not in cols:
+            conn.execute("ALTER TABLE resumes ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0")
+        if "last_index_signature" not in cols:
+            conn.execute("ALTER TABLE resumes ADD COLUMN last_index_signature TEXT")
+        if "last_index_status" not in cols:
+            conn.execute("ALTER TABLE resumes ADD COLUMN last_index_status TEXT")
+        if "last_index_error" not in cols:
+            conn.execute("ALTER TABLE resumes ADD COLUMN last_index_error TEXT")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def _ensure_linkedin_tables() -> None:
     """Create linkedin_searches and linkedin_contacts tables if missing."""
     from src.agents.linkedin_db import ensure_linkedin_tables
@@ -64,6 +82,7 @@ async def lifespan(app: FastAPI):
     # Pre-event-loop startup (sync, idempotent schema migrations)
     try:
         _ensure_round_number_column()
+        _ensure_resume_columns()
         _ensure_interview_plans_table()
         _ensure_linkedin_tables()
     except Exception as exc:
