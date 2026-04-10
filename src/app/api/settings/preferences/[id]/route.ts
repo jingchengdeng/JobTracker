@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, dbReady } from "@/db";
 import { userPreferences } from "@/db/schema";
 import { eq } from "drizzle-orm";
 
@@ -7,6 +7,7 @@ export async function PUT(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  await dbReady;
   const { id } = await params;
   const body = await request.json();
 
@@ -14,12 +15,11 @@ export async function PUT(
     return NextResponse.json({ error: "content is required" }, { status: 400 });
   }
 
-  const result = db
+  const [result] = await db
     .update(userPreferences)
     .set({ content: body.content.trim() })
     .where(eq(userPreferences.id, Number(id)))
-    .returning()
-    .get();
+    .returning();
 
   if (!result) {
     return NextResponse.json({ error: "Preference not found" }, { status: 404 });
@@ -32,13 +32,13 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  await dbReady;
   const { id } = await params;
 
-  const result = db
+  const [result] = await db
     .delete(userPreferences)
     .where(eq(userPreferences.id, Number(id)))
-    .returning()
-    .get();
+    .returning();
 
   if (!result) {
     return NextResponse.json({ error: "Preference not found" }, { status: 404 });

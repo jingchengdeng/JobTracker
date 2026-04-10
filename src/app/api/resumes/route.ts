@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, dbReady } from "@/db";
 import { resumes } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
-import fs from "fs";
+import fs from "fs/promises";
 import path from "path";
 
 const UPLOAD_DIR = path.join(process.cwd(), "data", "resumes");
 
 export async function GET() {
-  const result = db.select().from(resumes).orderBy(desc(resumes.createdAt)).all();
+  await dbReady;
+  const result = await db.select().from(resumes).orderBy(desc(resumes.createdAt));
   return NextResponse.json(result);
 }
 
 export async function POST(request: NextRequest) {
+  await dbReady;
   const formData = await request.formData();
   const file = formData.get("file") as File | null;
   const name = formData.get("name") as string | null;
@@ -27,16 +29,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Only PDF and DOCX files are supported" }, { status: 400 });
   }
 
-  if (!fs.existsSync(UPLOAD_DIR)) {
-    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-  }
+  await fs.mkdir(UPLOAD_DIR, { recursive: true });
 
   const buffer = Buffer.from(await file.arrayBuffer());
   const fileName = `${Date.now()}-${file.name}`;
   const filePath = path.join(UPLOAD_DIR, fileName);
 
   // Insert DB row first, then write file. If file write fails, remove the row.
-  const result = db
+  const [result] = await db
     .insert(resumes)
     .values({
       name,
@@ -44,13 +44,12 @@ export async function POST(request: NextRequest) {
       filePath: `data/resumes/${fileName}`,
       fileType: ext as "pdf" | "docx",
     })
-    .returning()
-    .get();
+    .returning();
 
   try {
-    fs.writeFileSync(filePath, buffer);
+    await fs.writeFile(filePath, buffer);
   } catch (err) {
-    db.delete(resumes).where(eq(resumes.id, result.id)).run();
+    await db.delete(resumes).where(eq(resumes.id, result.id));
     throw err;
   }
 

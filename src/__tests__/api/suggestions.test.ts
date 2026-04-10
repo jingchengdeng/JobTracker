@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 vi.mock("@/db", async () => {
   const { createMockDb } = await import("../helpers/mock-db");
-  return { db: createMockDb() };
+  return { db: createMockDb(), dbReady: Promise.resolve() };
 });
 
 const { db } = await import("@/db");
@@ -15,15 +15,7 @@ describe("GET /api/jobs/suggestions", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("returns suggestions for a valid field", async () => {
-    (db as any)
-      .selectDistinct()
-      .from()
-      .where()
-      .orderBy()
-      .all.mockReturnValue([
-        { value: "Google" },
-        { value: "Meta" },
-      ]);
+    (db as any)._queueResult([{ value: "Google" }, { value: "Meta" }]);
 
     const { GET } = await import("@/app/api/jobs/suggestions/route");
     const res = await GET(makeRequest("/api/jobs/suggestions?field=company"));

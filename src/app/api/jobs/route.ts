@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, dbReady } from "@/db";
 import { jobs } from "@/db/schema";
 import { eq, like, or, and, desc, asc, sql, getTableColumns } from "drizzle-orm";
 
 export async function GET(request: NextRequest) {
+  await dbReady;
   const params = request.nextUrl.searchParams;
   const status = params.get("status");
   const source = params.get("source");
@@ -42,16 +43,16 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  await dbReady;
   const body = await request.json();
 
-  const result = db
+  const [result] = await db
     .insert(jobs)
     .values({
       ...body,
       interviewDates: body.interviewDates ?? null,
     })
-    .returning()
-    .get();
+    .returning();
 
   return NextResponse.json(result, { status: 201 });
 }

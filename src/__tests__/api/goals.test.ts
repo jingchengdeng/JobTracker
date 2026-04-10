@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 vi.mock("@/db", async () => {
   const { createMockDb } = await import("../helpers/mock-db");
-  return { db: createMockDb() };
+  return { db: createMockDb(), dbReady: Promise.resolve() };
 });
 
 const { db } = await import("@/db");
@@ -14,7 +14,7 @@ describe("GET /api/goals", () => {
     const goalsList = [
       { id: 1, type: "weekly", target: 5, periodStart: "2026-03-16" },
     ];
-    (db.select().from({} as any) as any).all.mockReturnValue(goalsList);
+    (db as any)._queueResult(goalsList);
 
     const { GET } = await import("@/app/api/goals/route");
     const res = await GET();
@@ -35,9 +35,9 @@ describe("POST /api/goals", () => {
       target: 10,
       periodStart: "2026-03-16",
     };
-    // First .get() returns null (no existing), second returns the created goal
-    const chain = db.select().from({} as any);
-    (chain as any).get.mockReturnValueOnce(null).mockReturnValueOnce(created);
+    // First await: select existing → empty (not found)
+    // Second await: insert returning → [created]
+    (db as any)._queueResult([], [created]);
 
     const { POST } = await import("@/app/api/goals/route");
     const req = new NextRequest("http://localhost:3000/api/goals", {
@@ -62,12 +62,10 @@ describe("POST /api/goals", () => {
       target: 5,
       periodStart: "2026-03-16",
     };
-    (db.select().from({} as any).where({} as any) as any).get.mockReturnValue(
-      existing
-    );
-
     const updated = { ...existing, target: 15 };
-    (db as any).update().set().where().returning().get.mockReturnValue(updated);
+    // First await: select existing → [existing] (found)
+    // Second await: update returning → [updated]
+    (db as any)._queueResult([existing], [updated]);
 
     const { POST } = await import("@/app/api/goals/route");
     const req = new NextRequest("http://localhost:3000/api/goals", {

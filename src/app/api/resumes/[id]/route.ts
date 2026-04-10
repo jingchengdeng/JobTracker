@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, dbReady } from "@/db";
 import { resumes, aiRuns, aiSteps, aiMessages } from "@/db/schema";
 import { eq, inArray } from "drizzle-orm";
-import fs from "fs";
+import fs from "fs/promises";
 import path from "path";
 
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  await dbReady;
   const { id } = await params;
-  const resume = db.select().from(resumes).where(eq(resumes.id, Number(id))).get();
+  const [resume] = await db.select().from(resumes).where(eq(resumes.id, Number(id)));
 
   if (!resume) {
     return NextResponse.json({ error: "Resume not found" }, { status: 404 });
@@ -23,8 +24,9 @@ export async function DELETE(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  await dbReady;
   const { id } = await params;
-  const resume = db.select().from(resumes).where(eq(resumes.id, Number(id))).get();
+  const [resume] = await db.select().from(resumes).where(eq(resumes.id, Number(id)));
 
   if (!resume) {
     return NextResponse.json({ error: "Resume not found" }, { status: 404 });
@@ -45,26 +47,27 @@ export async function DELETE(
 
   // Cascade delete dependent AI records so the FK constraint on ai_runs.resume_id
   // doesn't block removal. Wrap in a transaction for atomicity.
-  db.transaction((tx) => {
-    const runs = tx
+  await db.transaction(async (tx) => {
+    const runs = await tx
       .select({ id: aiRuns.id })
       .from(aiRuns)
-      .where(eq(aiRuns.resumeId, resumeId))
-      .all();
+      .where(eq(aiRuns.resumeId, resumeId));
     const runIds = runs.map((r) => r.id);
 
     if (runIds.length > 0) {
-      tx.delete(aiMessages).where(inArray(aiMessages.runId, runIds)).run();
-      tx.delete(aiSteps).where(inArray(aiSteps.runId, runIds)).run();
-      tx.delete(aiRuns).where(inArray(aiRuns.id, runIds)).run();
+      await tx.delete(aiMessages).where(inArray(aiMessages.runId, runIds));
+      await tx.delete(aiSteps).where(inArray(aiSteps.runId, runIds));
+      await tx.delete(aiRuns).where(inArray(aiRuns.id, runIds));
     }
 
-    tx.delete(resumes).where(eq(resumes.id, resumeId)).run();
+    await tx.delete(resumes).where(eq(resumes.id, resumeId));
   });
 
   // Delete file after DB transaction succeeds
-  if (fs.existsSync(filePath)) {
-    fs.unlinkSync(filePath);
+  try {
+    await fs.unlink(filePath);
+  } catch {
+    // File already deleted or never existed
   }
 
   return NextResponse.json({ success: true });

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 vi.mock("@/db", async () => {
   const { createMockDb } = await import("../helpers/mock-db");
-  return { db: createMockDb() };
+  return { db: createMockDb(), dbReady: Promise.resolve() };
 });
 
 const { db } = await import("@/db");
@@ -16,9 +16,7 @@ describe("GET /api/jobs/[id]", () => {
 
   it("returns a job when found", async () => {
     const job = { id: 1, title: "Dev", company: "Acme" };
-    (db.select().from({} as any).where({} as any) as any).get.mockReturnValue(
-      job
-    );
+    (db as any)._queueResult([job]);
 
     const { GET } = await import("@/app/api/jobs/[id]/route");
     const req = new NextRequest("http://localhost:3000/api/jobs/1");
@@ -30,9 +28,7 @@ describe("GET /api/jobs/[id]", () => {
   });
 
   it("returns 404 when not found", async () => {
-    (db.select().from({} as any).where({} as any) as any).get.mockReturnValue(
-      null
-    );
+    (db as any)._queueResult([]);
 
     const { GET } = await import("@/app/api/jobs/[id]/route");
     const req = new NextRequest("http://localhost:3000/api/jobs/999");
@@ -47,7 +43,7 @@ describe("PUT /api/jobs/[id]", () => {
 
   it("updates and returns the job", async () => {
     const updated = { id: 1, title: "Senior Dev", company: "Acme" };
-    (db as any).update().set().where().returning().get.mockReturnValue(updated);
+    (db as any)._queueResult([updated]);
 
     const { PUT } = await import("@/app/api/jobs/[id]/route");
     const req = new NextRequest("http://localhost:3000/api/jobs/1", {
@@ -62,7 +58,7 @@ describe("PUT /api/jobs/[id]", () => {
   });
 
   it("returns 404 when job doesnt exist", async () => {
-    (db as any).update().set().where().returning().get.mockReturnValue(null);
+    (db as any)._queueResult([]);
 
     const { PUT } = await import("@/app/api/jobs/[id]/route");
     const req = new NextRequest("http://localhost:3000/api/jobs/999", {
@@ -80,7 +76,7 @@ describe("DELETE /api/jobs/[id]", () => {
 
   it("deletes and returns success", async () => {
     const deleted = { id: 1, title: "Dev" };
-    (db as any).delete().where().returning().get.mockReturnValue(deleted);
+    (db as any)._queueResult([deleted]);
 
     const { DELETE } = await import("@/app/api/jobs/[id]/route");
     const req = new NextRequest("http://localhost:3000/api/jobs/1", {
@@ -94,7 +90,7 @@ describe("DELETE /api/jobs/[id]", () => {
   });
 
   it("returns 404 when job doesnt exist", async () => {
-    (db as any).delete().where().returning().get.mockReturnValue(null);
+    (db as any)._queueResult([]);
 
     const { DELETE } = await import("@/app/api/jobs/[id]/route");
     const req = new NextRequest("http://localhost:3000/api/jobs/999", {

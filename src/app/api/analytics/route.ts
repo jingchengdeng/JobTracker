@@ -1,32 +1,32 @@
 import { NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, dbReady } from "@/db";
 import { jobs, goals } from "@/db/schema";
 import { sql, and, gte, lt, count } from "drizzle-orm";
 
 export async function GET() {
+  await dbReady;
+
   // Total by status
-  const byStatus = db
+  const byStatus = await db
     .select({
       status: jobs.status,
       count: count(),
     })
     .from(jobs)
-    .groupBy(jobs.status)
-    .all();
+    .groupBy(jobs.status);
 
   // Total by source
-  const bySource = db
+  const bySource = await db
     .select({
       source: jobs.source,
       count: count(),
     })
     .from(jobs)
     .where(sql`${jobs.source} IS NOT NULL`)
-    .groupBy(jobs.source)
-    .all();
+    .groupBy(jobs.source);
 
   // Applications per week (last 12 weeks)
-  const byWeek = db
+  const byWeek = await db
     .select({
       week: sql<string>`strftime('%Y-%W', ${jobs.dateApplied})`.as("week"),
       count: count(),
@@ -39,11 +39,10 @@ export async function GET() {
       )
     )
     .groupBy(sql`strftime('%Y-%W', ${jobs.dateApplied})`)
-    .orderBy(sql`week`)
-    .all();
+    .orderBy(sql`week`);
 
   // Salary distribution (buckets of 20k)
-  const salaryDist = db
+  const salaryDist = await db
     .select({
       bucket: sql<number>`(${jobs.salaryMin} / 20000) * 20000`.as("bucket"),
       count: count(),
@@ -51,8 +50,7 @@ export async function GET() {
     .from(jobs)
     .where(sql`${jobs.salaryMin} IS NOT NULL`)
     .groupBy(sql`bucket`)
-    .orderBy(sql`bucket`)
-    .all();
+    .orderBy(sql`bucket`);
 
   // Total counts
   const totalApplied = byStatus.reduce((sum, s) => sum + s.count, 0);
@@ -66,36 +64,37 @@ export async function GET() {
     totalApplied > 0 ? Math.round((responded / totalApplied) * 100) : 0;
 
   // Goal progress — compute period end in JS, not SQL
-  const allGoals = db.select().from(goals).all();
-  const goalProgress = allGoals.map((goal) => {
-    const start = new Date(goal.periodStart);
-    let end: Date;
-    if (goal.type === "weekly") {
-      end = new Date(start);
-      end.setDate(end.getDate() + 7);
-    } else {
-      end = new Date(start);
-      end.setMonth(end.getMonth() + 1);
-    }
-    const periodEnd = end.toISOString().split("T")[0];
+  const allGoals = await db.select().from(goals);
+  const goalProgress = await Promise.all(
+    allGoals.map(async (goal) => {
+      const start = new Date(goal.periodStart);
+      let end: Date;
+      if (goal.type === "weekly") {
+        end = new Date(start);
+        end.setDate(end.getDate() + 7);
+      } else {
+        end = new Date(start);
+        end.setMonth(end.getMonth() + 1);
+      }
+      const periodEnd = end.toISOString().split("T")[0];
 
-    const applied = db
-      .select({ count: count() })
-      .from(jobs)
-      .where(
-        and(
-          sql`${jobs.dateApplied} IS NOT NULL`,
-          gte(jobs.dateApplied, goal.periodStart),
-          lt(jobs.dateApplied, periodEnd)
-        )
-      )
-      .get();
+      const [applied] = await db
+        .select({ count: count() })
+        .from(jobs)
+        .where(
+          and(
+            sql`${jobs.dateApplied} IS NOT NULL`,
+            gte(jobs.dateApplied, goal.periodStart),
+            lt(jobs.dateApplied, periodEnd)
+          )
+        );
 
-    return {
-      ...goal,
-      current: applied?.count || 0,
-    };
-  });
+      return {
+        ...goal,
+        current: applied?.count || 0,
+      };
+    })
+  );
 
   return NextResponse.json({
     byStatus,
