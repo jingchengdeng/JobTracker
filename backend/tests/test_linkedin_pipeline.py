@@ -199,16 +199,18 @@ class TestRunLinkedinPipelineIntegration:
         call_count = {"n": 0}
         returns = [mock_analysis, mock_review, mock_scores, mock_notes, mock_summary]
 
-        def invoke_side_effect(messages):
+        async def ainvoke_side_effect(messages):
             idx = call_count["n"]
             call_count["n"] += 1
             if idx < len(returns):
                 return returns[idx]
             return returns[-1]
 
-        structured_mock.invoke = invoke_side_effect
+        structured_mock.ainvoke = ainvoke_side_effect
         mock_llm.with_structured_output.return_value = structured_mock
-        mock_llm.invoke.return_value = mock_domain_response
+
+        mock_domain_async = AsyncMock(return_value=mock_domain_response)
+        mock_llm.ainvoke = mock_domain_async
 
         mock_apollo.return_value = {"name": "Stripe", "estimated_num_employees": 8000}
 
@@ -217,10 +219,10 @@ class TestRunLinkedinPipelineIntegration:
         ]
         mock_domain_search.return_value = None
 
-        search_id = create_search(job_id=1)
+        search_id = await create_search(job_id=1)
         await run_linkedin_pipeline(search_id, 1)
 
-        search = load_search(search_id)
+        search = await load_search(search_id)
         assert search["status"] == "completed"
-        contacts = load_contacts(search_id)
+        contacts = await load_contacts(search_id)
         assert len(contacts) >= 1

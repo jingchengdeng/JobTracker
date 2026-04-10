@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 from langchain_core.messages import SystemMessage, HumanMessage
@@ -34,19 +35,23 @@ def _build_system_prompt(session: dict, preferences: list[str]) -> str:
     return "\n".join(parts)
 
 
-def run_planning(session_id: int) -> None:
-    session = load_session(session_id)
-    llm = get_interview_model()
+async def run_planning(session_id: int) -> None:
+    session = await load_session(session_id)
+    llm = await get_interview_model()
     structured_llm = llm.with_structured_output(InterviewPlan, method="function_calling")
-    preferences = load_all_preferences()
+    preferences = await load_all_preferences()
 
     from src.db import get_connection
-    conn = get_connection()
-    job = conn.execute("SELECT description FROM jobs WHERE id = ?", (session["job_id"],)).fetchone()
-    resume = conn.execute(
-        "SELECT extracted_text FROM resumes WHERE id = ?", (session["resume_id"],)
-    ).fetchone() if session["resume_id"] else None
-    conn.close()
+    async with get_connection() as conn:
+        cursor = await conn.execute("SELECT description FROM jobs WHERE id = ?", (session["job_id"],))
+        job = await cursor.fetchone()
+        if session["resume_id"]:
+            cursor = await conn.execute(
+                "SELECT extracted_text FROM resumes WHERE id = ?", (session["resume_id"],)
+            )
+            resume = await cursor.fetchone()
+        else:
+            resume = None
 
     jd_text = job["description"] if job else ""
     resume_text = resume["extracted_text"] if resume else ""
@@ -61,25 +66,28 @@ def run_planning(session_id: int) -> None:
         f"The opening_prompt should be a single conversational question to start the interview."
     )
 
-    plan = structured_llm.invoke([
-        SystemMessage(content=system),
-        HumanMessage(content=prompt),
-    ])
+    plan = await asyncio.wait_for(
+        structured_llm.ainvoke([
+            SystemMessage(content=system),
+            HumanMessage(content=prompt),
+        ]),
+        timeout=60.0,
+    )
 
-    save_plan(session_id, plan.model_dump())
-    save_turn(session_id, "interviewer", plan.opening_prompt)
-    update_session_status(session_id, "active")
+    await save_plan(session_id, plan.model_dump())
+    await save_turn(session_id, "interviewer", plan.opening_prompt)
+    await update_session_status(session_id, "active")
 
 
-def process_interview_turn(session_id: int, transcript: str) -> TurnResponse:
-    session = load_session(session_id)
-    plan = load_plan(session_id)
-    turns = load_turns(session_id)
-    preferences = load_all_preferences()
+async def process_interview_turn(session_id: int, transcript: str) -> TurnResponse:
+    session = await load_session(session_id)
+    plan = await load_plan(session_id)
+    turns = await load_turns(session_id)
+    preferences = await load_all_preferences()
 
-    save_turn(session_id, "candidate", transcript)
+    await save_turn(session_id, "candidate", transcript)
 
-    llm = get_interview_model()
+    llm = await get_interview_model()
     system = _build_system_prompt(session, preferences)
 
     history = "\n".join(
@@ -104,19 +112,25 @@ def process_interview_turn(session_id: int, transcript: str) -> TurnResponse:
 
     try:
         structured_llm = llm.with_structured_output(TurnResponse, method="function_calling")
-        turn_response = structured_llm.invoke([
-            SystemMessage(content=system),
-            HumanMessage(content=prompt),
-        ])
+        turn_response = await asyncio.wait_for(
+            structured_llm.ainvoke([
+                SystemMessage(content=system),
+                HumanMessage(content=prompt),
+            ]),
+            timeout=30.0,
+        )
     except (ValidationError, Exception) as exc:
         logger.warning("Structured output failed, using fallback: %s", exc)
-        fallback = llm.invoke([
-            SystemMessage(content=system),
-            HumanMessage(content=(
-                f"{history}\n\nBriefly acknowledge the candidate's last answer, "
-                f"then ask ONE follow-up question."
-            )),
-        ])
+        fallback = await asyncio.wait_for(
+            llm.ainvoke([
+                SystemMessage(content=system),
+                HumanMessage(content=(
+                    f"{history}\n\nBriefly acknowledge the candidate's last answer, "
+                    f"then ask ONE follow-up question."
+                )),
+            ]),
+            timeout=30.0,
+        )
         turn_response = TurnResponse(
             next_action="follow_up",
             current_topic_covered=False,
@@ -125,20 +139,20 @@ def process_interview_turn(session_id: int, transcript: str) -> TurnResponse:
         )
 
     topic_ref = current_topic["id"] if current_topic else None
-    save_turn(session_id, "interviewer", turn_response.interviewer_message, plan_topic_ref=topic_ref)
+    await save_turn(session_id, "interviewer", turn_response.interviewer_message, plan_topic_ref=topic_ref)
 
     return turn_response
 
 
-def run_scoring(session_id: int) -> None:
-    session = load_session(session_id)
-    plan = load_plan(session_id)
-    turns = load_turns(session_id)
+async def run_scoring(session_id: int) -> None:
+    session = await load_session(session_id)
+    plan = await load_plan(session_id)
+    turns = await load_turns(session_id)
 
     from src.agents.interview_config import SCORING_DIMENSIONS
     dimensions = SCORING_DIMENSIONS.get(session["interview_type"], SCORING_DIMENSIONS["technical"])
 
-    llm = get_interview_model()
+    llm = await get_interview_model()
     structured_llm = llm.with_structured_output(InterviewScore, method="function_calling")
 
     history = "\n".join(
@@ -172,13 +186,16 @@ def run_scoring(session_id: int) -> None:
         f"questions where the candidate's answer was weak or incorrect."
     )
 
-    score = structured_llm.invoke([
-        SystemMessage(content=system),
-        HumanMessage(content=prompt),
-    ])
+    score = await asyncio.wait_for(
+        structured_llm.ainvoke([
+            SystemMessage(content=system),
+            HumanMessage(content=prompt),
+        ]),
+        timeout=60.0,
+    )
 
-    save_results(session_id, score.model_dump())
-    update_session_status(session_id, "completed")
+    await save_results(session_id, score.model_dump())
+    await update_session_status(session_id, "completed")
 
 
 def _format_plan(plan: dict) -> str:

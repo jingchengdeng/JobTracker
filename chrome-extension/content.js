@@ -7,6 +7,7 @@
 
   let lastUrl = location.href;
   let saveButton = null;
+  let saving = false;
 
   // --- URL polling for SPA navigation ---
   setInterval(() => {
@@ -77,6 +78,8 @@
   }
 
   async function onSaveClick() {
+    if (saving) return;
+    saving = true;
     setButtonState("loading", "Extracting...");
 
     try {
@@ -84,7 +87,7 @@
 
       if (!result) {
         setButtonState("error", "No job data found");
-        setTimeout(() => setButtonState(null, "Save to JobTracker"), 3000);
+        setTimeout(() => { setButtonState(null, "Save to JobTracker"); saving = false; }, 3000);
         return;
       }
 
@@ -119,7 +122,7 @@
         setButtonState("success", "Saved!");
       }
       console.log("[JobTracker] Result:", resp.data);
-      setTimeout(() => setButtonState(null, "Save to JobTracker"), 3000);
+      setTimeout(() => { setButtonState(null, "Save to JobTracker"); saving = false; }, 3000);
     } catch (err) {
       console.error("[JobTracker] Error:", err);
       let msg = "Save failed";
@@ -129,7 +132,7 @@
         msg = "Cannot reach backend";
       }
       setButtonState("error", msg);
-      setTimeout(() => setButtonState(null, "Save to JobTracker"), 3000);
+      setTimeout(() => { setButtonState(null, "Save to JobTracker"); saving = false; }, 3000);
     }
   }
 

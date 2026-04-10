@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 vi.mock("@/db", async () => {
   const { createMockDb } = await import("../helpers/mock-db");
-  return { db: createMockDb() };
+  return { db: createMockDb(), dbReady: Promise.resolve() };
 });
 
 const { db } = await import("@/db");
@@ -20,7 +20,7 @@ describe("GET /api/jobs", () => {
     const jobs = [
       { id: 1, title: "Dev", company: "Acme", status: "applied" },
     ];
-    (db as any)._setResolveData(jobs);
+    (db as any)._queueResult(jobs);
 
     const { GET } = await import("@/app/api/jobs/route");
     const res = await GET(makeRequest("/api/jobs"));
@@ -54,7 +54,7 @@ describe("POST /api/jobs", () => {
 
   it("creates a job and returns 201", async () => {
     const newJob = { id: 1, title: "Dev", company: "Acme", status: "saved" };
-    (db as any).insert().values().returning().get.mockReturnValue(newJob);
+    (db as any)._queueResult([newJob]);
 
     const { POST } = await import("@/app/api/jobs/route");
     const req = new NextRequest("http://localhost:3000/api/jobs", {

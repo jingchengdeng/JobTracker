@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"next dev --turbopack\" \"cd backend && uv run uvicorn src.main:app --reload --port 8000\"",
+    "dev": "concurrently \"next dev --turbopack\" \"cd backend && uv run uvicorn src.main:app --reload --port 8000\" \"cd backend && uv run chroma run --path ../data/vectordb --port 8200\"",
     "dev:web": "next dev --turbopack",
     "dev:backend": "cd backend && uv run uvicorn src.main:app --reload --port 8000",
     "build": "next build",
@@ -14,8 +14,8 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
+    "@libsql/client": "^0.17.2",
     "@mariozechner/pi-ai": "^0.65.0",
-    "better-sqlite3": "^12.8.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -37,7 +37,6 @@
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
-    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",

@@ -15,21 +15,21 @@ def test_db(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def session_with_plan(test_db):
+async def session_with_plan(test_db):
     """Create a session with a plan so turn processing works."""
     from src.agents.interview_db import create_session, save_plan, save_turn, update_session_status
 
-    session_id = create_session(
+    session_id = await create_session(
         job_id=1, resume_id=1, interview_type="technical",
         difficulty="medium", duration_minutes=30, voice="nova",
     )
-    save_plan(session_id, {
+    await save_plan(session_id, {
         "topics": [{"id": "t1", "area": "Design", "questions": ["Q1"], "rubric": ["R1"], "time_allocation_minutes": 10}],
         "total_questions_target": 3,
         "opening_prompt": "Hello",
-    }, [{"name": "Depth", "weight": 0.5, "description": "d"}])
-    save_turn(session_id, "interviewer", "Hello")
-    update_session_status(session_id, "active")
+    })
+    await save_turn(session_id, "interviewer", "Hello")
+    await update_session_status(session_id, "active")
     return session_id
 
 
@@ -66,7 +66,8 @@ class TestTTS:
         from src.agents.audio_pipeline import synthesize_speech
 
         mock_response = AsyncMock()
-        mock_response.iter_bytes = lambda chunk_size: _async_iter([b"chunk1", b"chunk2"])
+        # aiter_bytes is awaited and should return an async iterable
+        mock_response.aiter_bytes = AsyncMock(return_value=_async_iter([b"chunk1", b"chunk2"]))
         mock_client = AsyncMock()
         mock_client.audio.speech.create.return_value = mock_response
         mock_client_fn.return_value = mock_client

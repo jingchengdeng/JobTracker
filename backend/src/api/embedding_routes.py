@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -16,17 +18,15 @@ class ReindexRequest(BaseModel):
 
 @router.get("/status")
 async def embedding_status():
-    active_sig = get_active_signature()
-    configured_sig = configured_signature()
+    active_sig = await get_active_signature()
+    configured_sig = await configured_signature()
 
-    conn = get_connection()
-    try:
-        rows = conn.execute(
+    async with get_connection() as conn:
+        cursor = await conn.execute(
             "SELECT id, name, last_index_signature, last_index_status, last_index_error "
             "FROM resumes ORDER BY id"
-        ).fetchall()
-    finally:
-        conn.close()
+        )
+        rows = await cursor.fetchall()
 
     resumes = [
         {
@@ -57,9 +57,9 @@ async def reindex(req: ReindexRequest):
             detail={"error": "reindex_in_progress", "job_id": running.job_id},
         )
 
-    config = load_model_config()
+    config = await load_model_config()
     embedding = config["embedding"]
-    target_sig = configured_signature()
+    target_sig = await configured_signature()
     try:
         job_id = await start_reindex_job(
             target_signature=target_sig,

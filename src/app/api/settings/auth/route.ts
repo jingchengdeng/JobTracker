@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import fs from "fs";
+import fs from "fs/promises";
 import path from "path";
 
 const AUTH_FILE = path.join(process.cwd(), "data", "auth-profiles.json");
@@ -19,47 +19,50 @@ interface AuthStore {
   profiles: Record<string, AuthProfile>;
 }
 
-function ensureFile() {
+async function ensureFile() {
   const dir = path.dirname(AUTH_FILE);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  if (!fs.existsSync(AUTH_FILE)) {
-    fs.writeFileSync(AUTH_FILE, JSON.stringify({ profiles: {} }, null, 2));
+  await fs.mkdir(dir, { recursive: true });
+  try {
+    await fs.access(AUTH_FILE);
+  } catch {
+    await fs.writeFile(AUTH_FILE, JSON.stringify({ profiles: {} }, null, 2));
   }
 }
 
-function readStore(): AuthStore {
-  ensureFile();
-  return JSON.parse(fs.readFileSync(AUTH_FILE, "utf-8"));
+async function readStore(): Promise<AuthStore> {
+  await ensureFile();
+  const content = await fs.readFile(AUTH_FILE, "utf-8");
+  return JSON.parse(content);
 }
 
-function writeStore(store: AuthStore) {
-  ensureFile();
-  fs.writeFileSync(AUTH_FILE, JSON.stringify(store, null, 2));
+async function writeStore(store: AuthStore) {
+  await ensureFile();
+  const tmpFile = AUTH_FILE + ".tmp";
+  await fs.writeFile(tmpFile, JSON.stringify(store, null, 2));
+  await fs.rename(tmpFile, AUTH_FILE);
 }
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function withLock<T>(fn: () => T): Promise<T> {
-  ensureFile();
+async function withLock<T>(fn: () => T | Promise<T>): Promise<T> {
+  await ensureFile();
   const retries = 15;
   const minDelay = 50;
   const maxDelay = 500;
 
   for (let i = 0; i < retries; i++) {
     try {
-      fs.mkdirSync(LOCK_DIR);
+      await fs.mkdir(LOCK_DIR);
       break;
     } catch (err: any) {
       if (err.code !== "EEXIST") throw err;
       // Stale lock recovery
       try {
-        const st = fs.statSync(LOCK_DIR);
+        const st = await fs.stat(LOCK_DIR);
         if (Date.now() - st.mtimeMs > 30_000) {
-          fs.rmSync(LOCK_DIR, { recursive: true });
+          await fs.rm(LOCK_DIR, { recursive: true });
           continue;
         }
       } catch {
@@ -71,10 +74,10 @@ async function withLock<T>(fn: () => T): Promise<T> {
   }
 
   try {
-    return fn();
+    return await fn();
   } finally {
     try {
-      fs.rmSync(LOCK_DIR, { recursive: true });
+      await fs.rm(LOCK_DIR, { recursive: true });
     } catch {
       // Lock already released
     }
@@ -87,7 +90,7 @@ function maskKey(key: string): string {
 }
 
 export async function GET() {
-  const store = readStore();
+  const store = await readStore();
   const masked = Object.entries(store.profiles).map(([id, profile]) => ({
     id,
     type: profile.type,
@@ -115,11 +118,11 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  await withLock(() => {
-    const store = readStore();
+  await withLock(async () => {
+    const store = await readStore();
     const id = `${provider}:default`;
     store.profiles[id] = { type: "api_key", provider, key };
-    writeStore(store);
+    await writeStore(store);
   });
 
   return NextResponse.json({ id: `${provider}:default`, provider, status: "active" }, { status: 201 });
@@ -132,11 +135,11 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "id is required" }, { status: 400 });
   }
 
-  const removed = await withLock(() => {
-    const store = readStore();
+  const removed = await withLock(async () => {
+    const store = await readStore();
     if (!store.profiles[id]) return false;
     delete store.profiles[id];
-    writeStore(store);
+    await writeStore(store);
     return true;
   });
 

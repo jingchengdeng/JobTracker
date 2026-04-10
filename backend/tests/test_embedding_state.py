@@ -1,6 +1,5 @@
 import sqlite3
 import pytest
-from unittest.mock import patch
 
 from src.memory.embedding_state import (
     get_active_signature,
@@ -10,7 +9,7 @@ from src.memory.embedding_state import (
 
 
 @pytest.fixture
-def test_db(tmp_path):
+def test_db(tmp_path, monkeypatch):
     db_path = str(tmp_path / "test.db")
     conn = sqlite3.connect(db_path)
     conn.execute(
@@ -21,46 +20,37 @@ def test_db(tmp_path):
     )
     conn.commit()
     conn.close()
+    monkeypatch.setenv("JOBTRACKER_DB_PATH", db_path)
     return db_path
 
 
-@pytest.fixture(autouse=True)
-def mock_db(test_db, monkeypatch):
-    def make_conn():
-        conn = sqlite3.connect(test_db)
-        conn.row_factory = sqlite3.Row
-        return conn
-    monkeypatch.setattr("src.memory.embedding_state.get_connection", make_conn)
-    yield
+async def test_get_active_signature_returns_none_when_empty(test_db):
+    await ensure_row()
+    assert await get_active_signature() is None
 
 
-def test_get_active_signature_returns_none_when_empty():
-    ensure_row()
-    assert get_active_signature() is None
-
-
-def test_ensure_row_is_idempotent():
-    ensure_row()
-    ensure_row()
+async def test_ensure_row_is_idempotent(test_db):
+    await ensure_row()
+    await ensure_row()
     # Still exactly one row
-    assert get_active_signature() is None
+    assert await get_active_signature() is None
 
 
-def test_set_and_get_active_signature():
-    ensure_row()
-    set_active_signature("openai__text_embedding_3_small")
-    assert get_active_signature() == "openai__text_embedding_3_small"
+async def test_set_and_get_active_signature(test_db):
+    await ensure_row()
+    await set_active_signature("openai__text_embedding_3_small")
+    assert await get_active_signature() == "openai__text_embedding_3_small"
 
 
-def test_set_active_signature_updates_value_across_calls():
-    ensure_row()
-    set_active_signature("sig_a")
-    set_active_signature("sig_b")
-    assert get_active_signature() == "sig_b"
+async def test_set_active_signature_updates_value_across_calls(test_db):
+    await ensure_row()
+    await set_active_signature("sig_a")
+    await set_active_signature("sig_b")
+    assert await get_active_signature() == "sig_b"
 
 
-def test_set_active_signature_to_none():
-    ensure_row()
-    set_active_signature("sig_a")
-    set_active_signature(None)
-    assert get_active_signature() is None
+async def test_set_active_signature_to_none(test_db):
+    await ensure_row()
+    await set_active_signature("sig_a")
+    await set_active_signature(None)
+    assert await get_active_signature() is None

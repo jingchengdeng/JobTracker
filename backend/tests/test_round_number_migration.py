@@ -5,7 +5,7 @@ from src.main import _ensure_round_number_column
 
 
 @pytest.fixture
-def legacy_db(tmp_path):
+def legacy_db(tmp_path, monkeypatch):
     db_path = str(tmp_path / "legacy.db")
     conn = sqlite3.connect(db_path)
     conn.executescript(
@@ -27,11 +27,12 @@ def legacy_db(tmp_path):
     )
     conn.commit()
     conn.close()
+    monkeypatch.setenv("JOBTRACKER_DB_PATH", db_path)
     return db_path
 
 
 def test_migration_adds_column_with_default_zero(legacy_db):
-    _ensure_round_number_column(legacy_db)
+    _ensure_round_number_column()
     conn = sqlite3.connect(legacy_db)
     cols = {r[1] for r in conn.execute("PRAGMA table_info(ai_steps)").fetchall()}
     assert "round_number" in cols
@@ -41,15 +42,15 @@ def test_migration_adds_column_with_default_zero(legacy_db):
 
 
 def test_migration_is_idempotent(legacy_db):
-    _ensure_round_number_column(legacy_db)
-    _ensure_round_number_column(legacy_db)  # should not raise
+    _ensure_round_number_column()
+    _ensure_round_number_column()  # should not raise
     conn = sqlite3.connect(legacy_db)
     cols = [r[1] for r in conn.execute("PRAGMA table_info(ai_steps)").fetchall()]
     conn.close()
     assert cols.count("round_number") == 1
 
 
-def test_migration_noop_when_column_exists(tmp_path):
+def test_migration_noop_when_column_exists(tmp_path, monkeypatch):
     db_path = str(tmp_path / "new.db")
     conn = sqlite3.connect(db_path)
     conn.execute(
@@ -58,7 +59,8 @@ def test_migration_noop_when_column_exists(tmp_path):
     conn.execute("INSERT INTO ai_steps (round_number) VALUES (3)")
     conn.commit()
     conn.close()
-    _ensure_round_number_column(db_path)
+    monkeypatch.setenv("JOBTRACKER_DB_PATH", db_path)
+    _ensure_round_number_column()
     conn = sqlite3.connect(db_path)
     row = conn.execute("SELECT round_number FROM ai_steps WHERE id = 1").fetchone()
     conn.close()

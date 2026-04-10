@@ -1,7 +1,7 @@
 """Tests for linkedin_search pure functions (no browser required)."""
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.agents.linkedin_search import (
     build_search_url,
@@ -144,6 +144,16 @@ class TestParseSearchResults:
         assert "janedoe-eng" in results[0]["linkedin_url"]
 
 
+def _make_async_client_mock(mock_response):
+    """Build an AsyncClient context-manager mock that returns mock_response on .get()."""
+    mock_client = AsyncMock()
+    mock_client.get.return_value = mock_response
+    mock_client_instance = MagicMock()
+    mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+    return mock_client_instance
+
+
 class TestBraveSearchProfiles:
     MOCK_BRAVE_RESPONSE = {
         "web": {
@@ -167,35 +177,38 @@ class TestBraveSearchProfiles:
         }
     }
 
-    @patch("src.agents.linkedin_search.httpx")
-    def test_returns_linkedin_profiles_only(self, mock_httpx):
+    @pytest.mark.asyncio
+    @patch("src.agents.linkedin_search.httpx.AsyncClient")
+    async def test_returns_linkedin_profiles_only(self, mock_client_cls):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = self.MOCK_BRAVE_RESPONSE
-        mock_httpx.get.return_value = mock_response
+        mock_client_cls.return_value = _make_async_client_mock(mock_response)
 
-        results = brave_search_profiles(
+        results = await brave_search_profiles(
             "site:linkedin.com/in recruiter Stripe", "fake-key"
         )
         assert len(results) == 2
         assert all("linkedin.com/in/" in r["linkedin_url"] for r in results)
 
-    @patch("src.agents.linkedin_search.httpx")
-    def test_parses_name_and_title(self, mock_httpx):
+    @pytest.mark.asyncio
+    @patch("src.agents.linkedin_search.httpx.AsyncClient")
+    async def test_parses_name_and_title(self, mock_client_cls):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = self.MOCK_BRAVE_RESPONSE
-        mock_httpx.get.return_value = mock_response
+        mock_client_cls.return_value = _make_async_client_mock(mock_response)
 
-        results = brave_search_profiles(
+        results = await brave_search_profiles(
             "site:linkedin.com/in recruiter Stripe", "fake-key"
         )
         amy = next(r for r in results if "amysalazar" in r["linkedin_url"])
         assert amy["name"] == "Amy Salazar"
         assert "Recruiter" in amy["title"]
 
-    @patch("src.agents.linkedin_search.httpx")
-    def test_deduplicates_urls(self, mock_httpx):
+    @pytest.mark.asyncio
+    @patch("src.agents.linkedin_search.httpx.AsyncClient")
+    async def test_deduplicates_urls(self, mock_client_cls):
         duped = {
             "web": {
                 "results": [
@@ -215,31 +228,40 @@ class TestBraveSearchProfiles:
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = duped
-        mock_httpx.get.return_value = mock_response
+        mock_client_cls.return_value = _make_async_client_mock(mock_response)
 
-        results = brave_search_profiles("query", "fake-key")
+        results = await brave_search_profiles("query", "fake-key")
         assert len(results) == 1
 
-    @patch("src.agents.linkedin_search.httpx")
-    def test_returns_empty_on_api_error(self, mock_httpx):
-        mock_httpx.get.side_effect = Exception("timeout")
-        results = brave_search_profiles("query", "fake-key")
+    @pytest.mark.asyncio
+    @patch("src.agents.linkedin_search.httpx.AsyncClient")
+    async def test_returns_empty_on_api_error(self, mock_client_cls):
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = Exception("timeout")
+        mock_client_instance = MagicMock()
+        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client_instance
+
+        results = await brave_search_profiles("query", "fake-key")
         assert results == []
 
-    @patch("src.agents.linkedin_search.httpx")
-    def test_returns_empty_on_non_200(self, mock_httpx):
+    @pytest.mark.asyncio
+    @patch("src.agents.linkedin_search.httpx.AsyncClient")
+    async def test_returns_empty_on_non_200(self, mock_client_cls):
         mock_response = MagicMock()
         mock_response.status_code = 429
         mock_response.text = "Rate limited"
-        mock_httpx.get.return_value = mock_response
+        mock_client_cls.return_value = _make_async_client_mock(mock_response)
 
-        results = brave_search_profiles("query", "fake-key")
+        results = await brave_search_profiles("query", "fake-key")
         assert results == []
 
 
 class TestBraveSearchDomain:
-    @patch("src.agents.linkedin_search.httpx")
-    def test_extracts_root_domain(self, mock_httpx):
+    @pytest.mark.asyncio
+    @patch("src.agents.linkedin_search.httpx.AsyncClient")
+    async def test_extracts_root_domain(self, mock_client_cls):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
@@ -249,13 +271,14 @@ class TestBraveSearchDomain:
                 ]
             }
         }
-        mock_httpx.get.return_value = mock_response
+        mock_client_cls.return_value = _make_async_client_mock(mock_response)
 
-        domain = brave_search_domain("Deloitte", "fake-key")
+        domain = await brave_search_domain("Deloitte", "fake-key")
         assert domain == "deloitte.com"
 
-    @patch("src.agents.linkedin_search.httpx")
-    def test_skips_excluded_domains(self, mock_httpx):
+    @pytest.mark.asyncio
+    @patch("src.agents.linkedin_search.httpx.AsyncClient")
+    async def test_skips_excluded_domains(self, mock_client_cls):
         mock_response = MagicMock()
         mock_response.status_code = 200
         mock_response.json.return_value = {
@@ -266,12 +289,19 @@ class TestBraveSearchDomain:
                 ]
             }
         }
-        mock_httpx.get.return_value = mock_response
+        mock_client_cls.return_value = _make_async_client_mock(mock_response)
 
-        domain = brave_search_domain("Deloitte", "fake-key")
+        domain = await brave_search_domain("Deloitte", "fake-key")
         assert domain == "deloitte.com"
 
-    @patch("src.agents.linkedin_search.httpx")
-    def test_returns_none_on_error(self, mock_httpx):
-        mock_httpx.get.side_effect = Exception("timeout")
-        assert brave_search_domain("Deloitte", "fake-key") is None
+    @pytest.mark.asyncio
+    @patch("src.agents.linkedin_search.httpx.AsyncClient")
+    async def test_returns_none_on_error(self, mock_client_cls):
+        mock_client = AsyncMock()
+        mock_client.get.side_effect = Exception("timeout")
+        mock_client_instance = MagicMock()
+        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client_instance.__aexit__ = AsyncMock(return_value=False)
+        mock_client_cls.return_value = mock_client_instance
+
+        assert await brave_search_domain("Deloitte", "fake-key") is None

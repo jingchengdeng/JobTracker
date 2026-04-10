@@ -1,18 +1,15 @@
 import { vi } from "vitest";
 
 /**
- * Creates a chainable mock that mimics drizzle's query builder.
+ * Creates a chainable mock that mimics drizzle's async query builder.
  * Every method returns the same chain object, so calls like
- * db.select().from().where().get() all work.
+ * db.select().from().where() all work.
  *
- * - .get() returns null by default
- * - .all() returns [] by default
- * - .then() makes the chain awaitable (for `await query` usage)
- *
- * Use _setResolveData() to control what `await query` returns.
+ * Awaiting the chain pops the next result from the queue (default: []).
+ * Use _queueResult() to push results in the order they'll be consumed.
  */
 export function createMockDb() {
-  let _resolveData: unknown = [];
+  const _resultQueue: unknown[] = [];
 
   const chain: Record<string, any> = {};
   const methods = [
@@ -28,6 +25,7 @@ export function createMockDb() {
     "set",
     "values",
     "returning",
+    "limit",
     "$dynamic",
   ];
 
@@ -35,21 +33,27 @@ export function createMockDb() {
     chain[m] = vi.fn(() => chain);
   }
 
-  chain.get = vi.fn(() => null);
-  chain.all = vi.fn(() => []);
-  chain.run = vi.fn(() => undefined);
-  chain.then = vi.fn((resolve: (v: unknown) => unknown) => resolve(_resolveData));
-  chain._setResolveData = (data: unknown) => {
-    _resolveData = data;
+  // Makes the chain awaitable — pops next result from the queue
+  chain.then = vi.fn(
+    (onFulfilled?: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) => {
+      const data = _resultQueue.length > 0 ? _resultQueue.shift() : [];
+      return Promise.resolve(data).then(onFulfilled, onRejected);
+    }
+  );
+
+  // Async transaction passes chain as tx and returns callback result
+  chain.transaction = vi.fn(async (fn: (tx: any) => Promise<unknown>) => {
+    return await fn(chain);
+  });
+
+  // Push results that will be returned by sequential awaits
+  chain._queueResult = (...results: unknown[]) => {
+    _resultQueue.push(...results);
+  };
+
+  chain._clearQueue = () => {
+    _resultQueue.length = 0;
   };
 
   return chain;
-}
-
-/**
- * Standard vi.mock factory for @/db. Use with:
- *   vi.mock("@/db", mockDbModule);
- */
-export function mockDbModule() {
-  return { db: createMockDb() };
 }

@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 import sqlite3
 from unittest.mock import patch, AsyncMock
@@ -42,9 +43,9 @@ class TestStartSearch:
 
 
 class TestGetSearch:
-    def test_get_running_search(self, client):
+    def test_get_running_search(self, client, db_path):
         from src.agents.linkedin_db import create_search
-        search_id = create_search(job_id=1)
+        search_id = asyncio.get_event_loop().run_until_complete(create_search(job_id=1))
         resp = client.get(f"/api/linkedin/{search_id}")
         assert resp.status_code == 200
         assert resp.json()["search"]["status"] == "running"
@@ -55,9 +56,9 @@ class TestGetSearch:
 
 
 class TestDeleteSearch:
-    def test_delete_search(self, client):
+    def test_delete_search(self, client, db_path):
         from src.agents.linkedin_db import create_search
-        search_id = create_search(job_id=1)
+        search_id = asyncio.get_event_loop().run_until_complete(create_search(job_id=1))
         resp = client.delete(f"/api/linkedin/{search_id}")
         assert resp.status_code == 200
         # Verify it is gone

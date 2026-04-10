@@ -1,9 +1,9 @@
-"""Tests for reconcile_resume_index_state — startup heal that keeps SQL
+"""Tests for reconcile_resume_index_state -- startup heal that keeps SQL
 per-resume state in sync with actual Chroma contents."""
 import sqlite3
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-import chromadb
-from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
 from src.memory.embedding_state import ensure_row, set_active_signature
 from src.memory.rag import reconcile_resume_index_state
@@ -34,18 +34,10 @@ def test_db(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def wire_env(test_db, tmp_path, monkeypatch):
-    vectordb = str(tmp_path / "vectordb")
-    monkeypatch.setenv("VECTORDB_PATH", vectordb)
-
-    def make_conn():
-        conn = sqlite3.connect(test_db)
-        conn.row_factory = sqlite3.Row
-        return conn
-    monkeypatch.setattr("src.memory.embedding_state.get_connection", make_conn)
-    monkeypatch.setattr("src.memory.rag.get_connection", make_conn)
-    ensure_row()
-    yield vectordb
+async def wire_env(test_db, monkeypatch):
+    monkeypatch.setenv("JOBTRACKER_DB_PATH", test_db)
+    await ensure_row()
+    yield
 
 
 def _insert_resume(db_path, rid, sig, status):
@@ -70,61 +62,112 @@ def _row(db_path, rid):
     return dict(r)
 
 
-def _seed_active_collection(vectordb_path, resume_ids):
-    client = chromadb.PersistentClient(path=vectordb_path)
-    ef = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-    col = client.get_or_create_collection(name=ACTIVE_COLLECTION_NAME, embedding_function=ef)
-    for rid in resume_ids:
-        col.add(
-            ids=[f"resume-{rid}-chunk-0"],
-            documents=[f"doc for {rid}"],
-            metadatas=[{"resume_id": rid, "resume_name": "r.pdf", "section_type": "x", "raw_text": "t"}],
-        )
+def _mock_client(collection_names=None, collection_metadatas=None):
+    """Build an AsyncMock Chroma client with configurable collections.
+
+    Args:
+        collection_names: names of collections that list_collections returns.
+        collection_metadatas: dict mapping collection name to the metadatas
+            list that col.get() returns.
+    """
+    if collection_names is None:
+        collection_names = []
+    if collection_metadatas is None:
+        collection_metadatas = {}
+
+    mock_collections = []
+    for name in collection_names:
+        c = MagicMock()
+        c.name = name
+        mock_collections.append(c)
+
+    client = AsyncMock()
+    client.list_collections.return_value = mock_collections
+
+    def _get_collection(name):
+        col = AsyncMock()
+        col.name = name
+        metas = collection_metadatas.get(name, [])
+        col.get.return_value = {"ids": [f"id-{i}" for i in range(len(metas))], "metadatas": metas}
+        return col
+
+    client.get_collection = AsyncMock(side_effect=_get_collection)
+    return client
 
 
-def test_orphan_signature_gets_reset_to_null(test_db, wire_env):
-    # No collections exist at all — any signature is orphaned
-    set_active_signature(ACTIVE_SIG)
+async def test_orphan_signature_gets_reset_to_null(test_db):
+    # No collections exist at all -- any signature is orphaned
+    await set_active_signature(ACTIVE_SIG)
     _insert_resume(test_db, 1, "some_phantom_sig", "ok")
-    reconcile_resume_index_state()
+
+    client = _mock_client(collection_names=[])
+    with patch("src.memory.collection_resolver._client", new_callable=AsyncMock, return_value=client):
+        await reconcile_resume_index_state()
+
     row = _row(test_db, 1)
     assert row["last_index_signature"] is None
     assert row["last_index_status"] is None
 
 
-def test_null_signature_healed_when_chunks_exist_in_active(test_db, wire_env):
-    set_active_signature(ACTIVE_SIG)
-    _seed_active_collection(wire_env, [5])
+async def test_null_signature_healed_when_chunks_exist_in_active(test_db):
+    await set_active_signature(ACTIVE_SIG)
     _insert_resume(test_db, 5, None, None)
-    reconcile_resume_index_state()
+
+    metadatas = [{"resume_id": 5, "resume_name": "r.pdf", "section_type": "x", "raw_text": "t"}]
+    client = _mock_client(
+        collection_names=[ACTIVE_COLLECTION_NAME],
+        collection_metadatas={ACTIVE_COLLECTION_NAME: metadatas},
+    )
+    with patch("src.memory.collection_resolver._client", new_callable=AsyncMock, return_value=client):
+        await reconcile_resume_index_state()
+
     row = _row(test_db, 5)
     assert row["last_index_signature"] == ACTIVE_SIG
     assert row["last_index_status"] == "ok"
 
 
-def test_null_signature_stays_null_when_no_chunks(test_db, wire_env):
-    set_active_signature(ACTIVE_SIG)
-    _seed_active_collection(wire_env, [1])  # only resume 1 has chunks
+async def test_null_signature_stays_null_when_no_chunks(test_db):
+    await set_active_signature(ACTIVE_SIG)
     _insert_resume(test_db, 2, None, None)
-    reconcile_resume_index_state()
+
+    # only resume 1 has chunks, not resume 2
+    metadatas = [{"resume_id": 1, "resume_name": "r.pdf", "section_type": "x", "raw_text": "t"}]
+    client = _mock_client(
+        collection_names=[ACTIVE_COLLECTION_NAME],
+        collection_metadatas={ACTIVE_COLLECTION_NAME: metadatas},
+    )
+    with patch("src.memory.collection_resolver._client", new_callable=AsyncMock, return_value=client):
+        await reconcile_resume_index_state()
+
     row = _row(test_db, 2)
     assert row["last_index_signature"] is None
 
 
-def test_correct_signature_is_left_alone(test_db, wire_env):
-    set_active_signature(ACTIVE_SIG)
-    _seed_active_collection(wire_env, [3])
+async def test_correct_signature_is_left_alone(test_db):
+    await set_active_signature(ACTIVE_SIG)
     _insert_resume(test_db, 3, ACTIVE_SIG, "ok")
-    reconcile_resume_index_state()
+
+    metadatas = [{"resume_id": 3, "resume_name": "r.pdf", "section_type": "x", "raw_text": "t"}]
+    client = _mock_client(
+        collection_names=[ACTIVE_COLLECTION_NAME],
+        collection_metadatas={ACTIVE_COLLECTION_NAME: metadatas},
+    )
+    with patch("src.memory.collection_resolver._client", new_callable=AsyncMock, return_value=client):
+        await reconcile_resume_index_state()
+
     row = _row(test_db, 3)
     assert row["last_index_signature"] == ACTIVE_SIG
     assert row["last_index_status"] == "ok"
 
 
-def test_noop_when_no_active_signature(test_db, wire_env):
+async def test_noop_when_no_active_signature(test_db):
     _insert_resume(test_db, 1, "any_sig", "ok")
-    # active_signature is NULL; reconcile should still clear orphan signatures
-    # because they point at collections that don't exist.
-    reconcile_resume_index_state()
+
+    # No collections exist, active_signature is NULL; reconcile should
+    # still clear orphan signatures that point at missing collections.
+    client = _mock_client(collection_names=[])
+    with patch("src.memory.collection_resolver._client", new_callable=AsyncMock, return_value=client):
+        await reconcile_resume_index_state()
+
     row = _row(test_db, 1)
     assert row["last_index_signature"] is None

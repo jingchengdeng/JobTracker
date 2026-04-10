@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Trash2, Download } from "lucide-react";
+import { FileText, Trash2, Download, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -10,6 +10,7 @@ import type { EmbeddingResumeStatus, Resume } from "@/lib/types";
 interface ResumeCardProps {
   resume: Resume;
   onDelete: (id: number) => void;
+  onSetDefault?: (id: number) => void;
   embeddingStatus?: EmbeddingResumeStatus | null;
   activeSignature?: string | null;
   configuredSignature?: string;
@@ -20,14 +21,17 @@ interface ResumeCardProps {
 export function ResumeCard({
   resume,
   onDelete,
+  onSetDefault,
   embeddingStatus,
   activeSignature,
   configuredSignature,
   isIndexing,
   onReindex,
 }: ResumeCardProps) {
+  const isDefault = resume.isDefault === 1;
+
   return (
-    <Card className="flex flex-col gap-4 p-5 transition-[shadow,border-color] duration-200 hover:shadow-lg hover:shadow-indigo-500/5 hover:border-white/10">
+    <Card className={`flex flex-col gap-4 p-5 transition-[shadow,border-color] duration-200 hover:shadow-lg hover:shadow-indigo-500/5 hover:border-white/10 ${isDefault ? "border-amber-500/40" : ""}`}>
       <div className="flex items-start justify-between">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-500/10">
@@ -40,9 +44,23 @@ export function ResumeCard({
             )}
           </div>
         </div>
-        <Badge variant="secondary" className="text-xs">
-          {resume.fileType.toUpperCase()}
-        </Badge>
+        <div className="flex items-center gap-2">
+          {onSetDefault && (
+            <button
+              type="button"
+              onClick={() => onSetDefault(resume.id)}
+              className="cursor-pointer p-1 rounded hover:bg-white/5 transition-colors"
+              title={isDefault ? "Default resume" : "Set as default"}
+            >
+              <Star
+                className={`h-4 w-4 ${isDefault ? "text-amber-400 fill-amber-400" : "text-muted-foreground"}`}
+              />
+            </button>
+          )}
+          <Badge variant="secondary" className="text-xs">
+            {resume.fileType.toUpperCase()}
+          </Badge>
+        </div>
       </div>
 
       <div className="flex items-center justify-between text-sm text-muted-foreground">

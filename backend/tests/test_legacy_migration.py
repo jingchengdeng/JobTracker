@@ -1,11 +1,10 @@
 import sqlite3
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
-from unittest.mock import patch
 
-import chromadb
-
+from src.memory.embedding_state import ensure_row, get_active_signature, set_active_signature
 from src.memory.legacy_migration import migrate_legacy_collection
-from src.memory.embedding_state import ensure_row, get_active_signature
 
 
 @pytest.fixture
@@ -33,19 +32,9 @@ def test_db(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def mock_env(test_db, tmp_path, monkeypatch):
-    vectordb = str(tmp_path / "vectordb")
-    monkeypatch.setenv("VECTORDB_PATH", vectordb)
+async def mock_env(test_db, monkeypatch):
     monkeypatch.setenv("JOBTRACKER_DB_PATH", test_db)
-
-    def make_conn():
-        conn = sqlite3.connect(test_db)
-        conn.row_factory = sqlite3.Row
-        return conn
-    monkeypatch.setattr("src.memory.embedding_state.get_connection", make_conn)
-    monkeypatch.setattr("src.memory.legacy_migration.get_connection", make_conn)
-    ensure_row()
-    yield vectordb
+    await ensure_row()
 
 
 @pytest.fixture
@@ -57,69 +46,130 @@ def fake_config():
         yield m
 
 
-def test_migration_skips_when_active_signature_set(fake_config):
-    from src.memory.embedding_state import set_active_signature
-    set_active_signature("already_set")
-    migrate_legacy_collection()
-    assert get_active_signature() == "already_set"
+def _make_mock_client(*, has_legacy=False, payload=None):
+    """Return an AsyncMock that mimics the async ChromaDB client."""
+    client = AsyncMock()
+
+    if has_legacy:
+        legacy_col = MagicMock()
+        legacy_col.name = "resume_chunks"
+        client.list_collections.return_value = [legacy_col]
+    else:
+        client.list_collections.return_value = []
+
+    legacy_collection = AsyncMock()
+    if payload is None:
+        payload = {"ids": [], "embeddings": None, "documents": None, "metadatas": None}
+    legacy_collection.get.return_value = payload
+    client.get_collection.return_value = legacy_collection
+    client.delete_collection.return_value = None
+
+    return client
 
 
-def test_migration_skips_when_no_legacy_collection(fake_config):
-    migrate_legacy_collection()
-    assert get_active_signature() is None
+async def test_migration_skips_when_active_signature_set(fake_config):
+    await set_active_signature("already_set")
+    await migrate_legacy_collection()
+    assert await get_active_signature() == "already_set"
 
 
-def test_migration_copies_and_sets_signature(fake_config, mock_env):
-    from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-    client = chromadb.PersistentClient(path=mock_env)
-    ef = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-    legacy = client.get_or_create_collection(name="resume_chunks", embedding_function=ef)
-    legacy.add(
-        ids=["resume-1-chunk-0"],
-        documents=["A.pdf -- general -- alpha text content here"],
-        metadatas=[{"resume_id": 1, "resume_name": "A.pdf", "section_type": "general", "raw_text": "alpha text content here"}],
-    )
-    del legacy, client
-
-    migrate_legacy_collection()
-
-    assert get_active_signature() == "sentence_transformer__all_minilm_l6_v2"
-    client2 = chromadb.PersistentClient(path=mock_env)
-    names = [c.name for c in client2.list_collections()]
-    assert "resume_chunks" not in names
-    assert "resume_chunks__sentence_transformer__all_minilm_l6_v2" in names
+async def test_migration_skips_when_no_legacy_collection(fake_config):
+    mock_client = _make_mock_client(has_legacy=False)
+    with patch("src.memory.legacy_migration._client", return_value=mock_client):
+        await migrate_legacy_collection()
+    assert await get_active_signature() is None
 
 
-def test_migration_marks_resumes_with_chunks_as_ok(fake_config, mock_env, test_db):
-    from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-    client = chromadb.PersistentClient(path=mock_env)
-    ef = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-    legacy = client.get_or_create_collection(name="resume_chunks", embedding_function=ef)
-    legacy.add(
-        ids=["resume-1-chunk-0"],
-        documents=["alpha"],
-        metadatas=[{"resume_id": 1, "resume_name": "A.pdf", "section_type": "general", "raw_text": "alpha"}],
-    )
-    del legacy, client
+async def test_migration_copies_and_sets_signature(fake_config):
+    payload = {
+        "ids": ["resume-1-chunk-0"],
+        "embeddings": [[0.1, 0.2, 0.3]],
+        "documents": ["A.pdf -- general -- alpha text content here"],
+        "metadatas": [
+            {
+                "resume_id": 1,
+                "resume_name": "A.pdf",
+                "section_type": "general",
+                "raw_text": "alpha text content here",
+            }
+        ],
+    }
+    mock_client = _make_mock_client(has_legacy=True, payload=payload)
+    new_col = AsyncMock()
+    new_col.name = "resume_chunks__sentence_transformer__all_minilm_l6_v2"
 
-    migrate_legacy_collection()
+    with (
+        patch("src.memory.legacy_migration._client", return_value=mock_client),
+        patch(
+            "src.memory.legacy_migration.collection_for_signature",
+            return_value=new_col,
+        ),
+    ):
+        await migrate_legacy_collection()
+
+    assert await get_active_signature() == "sentence_transformer__all_minilm_l6_v2"
+    new_col.add.assert_awaited_once()
+    mock_client.delete_collection.assert_awaited_once_with(name="resume_chunks")
+
+
+async def test_migration_marks_resumes_with_chunks_as_ok(fake_config, test_db):
+    payload = {
+        "ids": ["resume-1-chunk-0"],
+        "embeddings": [[0.1, 0.2]],
+        "documents": ["alpha"],
+        "metadatas": [
+            {
+                "resume_id": 1,
+                "resume_name": "A.pdf",
+                "section_type": "general",
+                "raw_text": "alpha",
+            }
+        ],
+    }
+    mock_client = _make_mock_client(has_legacy=True, payload=payload)
+    new_col = AsyncMock()
+    new_col.name = "resume_chunks__sentence_transformer__all_minilm_l6_v2"
+
+    with (
+        patch("src.memory.legacy_migration._client", return_value=mock_client),
+        patch(
+            "src.memory.legacy_migration.collection_for_signature",
+            return_value=new_col,
+        ),
+    ):
+        await migrate_legacy_collection()
 
     conn = sqlite3.connect(test_db)
     conn.row_factory = sqlite3.Row
-    row = conn.execute("SELECT last_index_signature, last_index_status FROM resumes WHERE id=1").fetchone()
+    row = conn.execute(
+        "SELECT last_index_signature, last_index_status FROM resumes WHERE id=1"
+    ).fetchone()
     conn.close()
     assert row["last_index_signature"] == "sentence_transformer__all_minilm_l6_v2"
     assert row["last_index_status"] == "ok"
 
 
-def test_migration_idempotent_second_call(fake_config, mock_env):
-    from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
-    client = chromadb.PersistentClient(path=mock_env)
-    ef = SentenceTransformerEmbeddingFunction(model_name="all-MiniLM-L6-v2")
-    client.get_or_create_collection(name="resume_chunks", embedding_function=ef)
-    del client
+async def test_migration_idempotent_second_call(fake_config):
+    payload = {
+        "ids": ["resume-1-chunk-0"],
+        "embeddings": [[0.1]],
+        "documents": ["text"],
+        "metadatas": [{"resume_id": 1}],
+    }
+    mock_client = _make_mock_client(has_legacy=True, payload=payload)
+    new_col = AsyncMock()
+    new_col.name = "resume_chunks__sentence_transformer__all_minilm_l6_v2"
 
-    migrate_legacy_collection()
-    first = get_active_signature()
-    migrate_legacy_collection()
-    assert get_active_signature() == first
+    with (
+        patch("src.memory.legacy_migration._client", return_value=mock_client),
+        patch(
+            "src.memory.legacy_migration.collection_for_signature",
+            return_value=new_col,
+        ),
+    ):
+        await migrate_legacy_collection()
+    first = await get_active_signature()
+
+    # Second call should be a no-op because active_signature is now set
+    await migrate_legacy_collection()
+    assert await get_active_signature() == first

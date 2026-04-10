@@ -66,10 +66,10 @@ def test_db(tmp_path, monkeypatch):
 
 
 class TestCreateSession:
-    def test_creates_session_with_planning_status(self, test_db):
+    async def test_creates_session_with_planning_status(self, test_db):
         from src.agents.interview_db import create_session
 
-        session_id = create_session(
+        session_id = await create_session(
             job_id=1, resume_id=1, interview_type="technical",
             difficulty="medium", duration_minutes=30, voice="nova",
         )
@@ -82,10 +82,10 @@ class TestCreateSession:
         assert row["status"] == "planning"
         assert row["interview_type"] == "technical"
 
-    def test_nullable_resume_id(self, test_db):
+    async def test_nullable_resume_id(self, test_db):
         from src.agents.interview_db import create_session
 
-        session_id = create_session(
+        session_id = await create_session(
             job_id=1, resume_id=None, interview_type="behavioral",
             difficulty="easy", duration_minutes=15, voice="alloy",
         )
@@ -97,31 +97,31 @@ class TestCreateSession:
 
 
 class TestSavePlan:
-    def test_saves_and_loads_plan(self, test_db):
+    async def test_saves_and_loads_plan(self, test_db):
         from src.agents.interview_db import create_session, save_plan, load_plan
 
-        session_id = create_session(
+        session_id = await create_session(
             job_id=1, resume_id=1, interview_type="technical",
             difficulty="medium", duration_minutes=30, voice="nova",
         )
         plan = {"topics": [], "opening_prompt": "Hi"}
-        save_plan(session_id, plan)
+        await save_plan(session_id, plan)
 
-        loaded_plan = load_plan(session_id)
+        loaded_plan = await load_plan(session_id)
         assert loaded_plan["opening_prompt"] == "Hi"
 
 
 class TestSaveTurn:
-    def test_saves_turn_with_auto_number(self, test_db):
+    async def test_saves_turn_with_auto_number(self, test_db):
         from src.agents.interview_db import create_session, save_turn, load_turns
 
-        session_id = create_session(
+        session_id = await create_session(
             job_id=1, resume_id=1, interview_type="technical",
             difficulty="medium", duration_minutes=30, voice="nova",
         )
-        save_turn(session_id, "interviewer", "Tell me about yourself.", plan_topic_ref="intro")
-        save_turn(session_id, "candidate", "I am a developer.")
-        turns = load_turns(session_id)
+        await save_turn(session_id, "interviewer", "Tell me about yourself.", plan_topic_ref="intro")
+        await save_turn(session_id, "candidate", "I am a developer.")
+        turns = await load_turns(session_id)
         assert len(turns) == 2
         assert turns[0]["turn_number"] == 1
         assert turns[0]["role"] == "interviewer"
@@ -130,39 +130,39 @@ class TestSaveTurn:
 
 
 class TestSessionStatus:
-    def test_update_status(self, test_db):
+    async def test_update_status(self, test_db):
         from src.agents.interview_db import create_session, update_session_status, load_session
 
-        session_id = create_session(
+        session_id = await create_session(
             job_id=1, resume_id=1, interview_type="technical",
             difficulty="medium", duration_minutes=30, voice="nova",
         )
-        update_session_status(session_id, "active")
-        session = load_session(session_id)
+        await update_session_status(session_id, "active")
+        session = await load_session(session_id)
         assert session["status"] == "active"
 
 
 class TestDeleteSession:
-    def test_deletes_all_related_data(self, test_db):
+    async def test_deletes_all_related_data(self, test_db):
         import sqlite3
         from src.agents.interview_db import (
             create_session, save_plan, save_turn, save_results, delete_session,
         )
 
-        session_id = create_session(
+        session_id = await create_session(
             job_id=1, resume_id=1, interview_type="technical",
             difficulty="medium", duration_minutes=30, voice="nova",
         )
-        save_plan(session_id, {"topics": [], "opening_prompt": "Hi"})
-        save_turn(session_id, "interviewer", "Tell me about yourself.")
-        save_turn(session_id, "candidate", "I am a developer.")
-        save_results(session_id, {
+        await save_plan(session_id, {"topics": [], "opening_prompt": "Hi"})
+        await save_turn(session_id, "interviewer", "Tell me about yourself.")
+        await save_turn(session_id, "candidate", "I am a developer.")
+        await save_results(session_id, {
             "dimension_scores": [{"name": "X", "score": 7, "feedback": "Good", "evidence": "Said X"}],
             "strengths": ["Clear"], "improvements": ["More depth"],
             "model_answers": [], "summary": "Solid.",
         })
 
-        delete_session(session_id)
+        await delete_session(session_id)
 
         conn = sqlite3.connect(test_db)
         conn.row_factory = sqlite3.Row
@@ -172,51 +172,51 @@ class TestDeleteSession:
         assert conn.execute("SELECT COUNT(*) FROM interview_results WHERE session_id = ?", (session_id,)).fetchone()[0] == 0
         conn.close()
 
-    def test_noop_on_nonexistent_session(self, test_db):
+    async def test_noop_on_nonexistent_session(self, test_db):
         from src.agents.interview_db import delete_session
 
-        delete_session(99999)  # Should not raise
+        await delete_session(99999)  # Should not raise
 
 
 class TestTryTransitionToScoring:
-    def test_transitions_active_session(self, test_db):
+    async def test_transitions_active_session(self, test_db):
         from src.agents.interview_db import create_session, update_session_status, try_transition_to_scoring, load_session
 
-        session_id = create_session(
+        session_id = await create_session(
             job_id=1, resume_id=1, interview_type="technical",
             difficulty="medium", duration_minutes=30, voice="nova",
         )
-        update_session_status(session_id, "active")
-        assert try_transition_to_scoring(session_id) is True
-        assert load_session(session_id)["status"] == "scoring"
+        await update_session_status(session_id, "active")
+        assert await try_transition_to_scoring(session_id) is True
+        assert (await load_session(session_id))["status"] == "scoring"
 
-    def test_rejects_already_scoring(self, test_db):
+    async def test_rejects_already_scoring(self, test_db):
         from src.agents.interview_db import create_session, update_session_status, try_transition_to_scoring
 
-        session_id = create_session(
+        session_id = await create_session(
             job_id=1, resume_id=1, interview_type="technical",
             difficulty="medium", duration_minutes=30, voice="nova",
         )
-        update_session_status(session_id, "active")
-        assert try_transition_to_scoring(session_id) is True
-        assert try_transition_to_scoring(session_id) is False
+        await update_session_status(session_id, "active")
+        assert await try_transition_to_scoring(session_id) is True
+        assert await try_transition_to_scoring(session_id) is False
 
-    def test_rejects_completed_session(self, test_db):
+    async def test_rejects_completed_session(self, test_db):
         from src.agents.interview_db import create_session, update_session_status, try_transition_to_scoring
 
-        session_id = create_session(
+        session_id = await create_session(
             job_id=1, resume_id=1, interview_type="technical",
             difficulty="medium", duration_minutes=30, voice="nova",
         )
-        update_session_status(session_id, "completed")
-        assert try_transition_to_scoring(session_id) is False
+        await update_session_status(session_id, "completed")
+        assert await try_transition_to_scoring(session_id) is False
 
-    def test_transitions_planning_session(self, test_db):
+    async def test_transitions_planning_session(self, test_db):
         from src.agents.interview_db import create_session, try_transition_to_scoring, load_session
 
-        session_id = create_session(
+        session_id = await create_session(
             job_id=1, resume_id=1, interview_type="technical",
             difficulty="medium", duration_minutes=30, voice="nova",
         )
-        assert try_transition_to_scoring(session_id) is True
-        assert load_session(session_id)["status"] == "scoring"
+        assert await try_transition_to_scoring(session_id) is True
+        assert (await load_session(session_id))["status"] == "scoring"

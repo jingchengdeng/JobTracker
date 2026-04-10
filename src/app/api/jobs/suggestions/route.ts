@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/db";
+import { db, dbReady } from "@/db";
 import { jobs } from "@/db/schema";
 import { sql } from "drizzle-orm";
 
@@ -12,6 +12,7 @@ const ALLOWED_FIELDS = [
 ] as const;
 
 export async function GET(request: NextRequest) {
+  await dbReady;
   const field = request.nextUrl.searchParams.get("field");
 
   if (!field || !ALLOWED_FIELDS.includes(field as any)) {
@@ -21,12 +22,11 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const results = db
+  const results = await db
     .selectDistinct({ value: sql<string>`${sql.raw(field)}` })
     .from(jobs)
     .where(sql`${sql.raw(field)} IS NOT NULL AND ${sql.raw(field)} != ''`)
-    .orderBy(sql`${sql.raw(field)}`)
-    .all();
+    .orderBy(sql`${sql.raw(field)}`);
 
   return NextResponse.json(results.map((r) => r.value));
 }

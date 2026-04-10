@@ -4,15 +4,15 @@ from src.db import get_connection
 MAX_RAW_ROUNDS = 3
 
 
-def get_recent_messages(run_id: int) -> list[dict]:
+async def get_recent_messages(run_id: int) -> list[dict]:
     """Get the last MAX_RAW_ROUNDS rounds of messages for a run."""
-    conn = get_connection()
-    rows = conn.execute(
-        "SELECT role, content, round_number FROM ai_messages "
-        "WHERE run_id = ? ORDER BY round_number DESC, id DESC",
-        (run_id,),
-    ).fetchall()
-    conn.close()
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "SELECT role, content, round_number FROM ai_messages "
+            "WHERE run_id = ? ORDER BY round_number DESC, id DESC",
+            (run_id,),
+        )
+        rows = await cursor.fetchall()
 
     if not rows:
         return []
@@ -29,68 +29,82 @@ def get_recent_messages(run_id: int) -> list[dict]:
     return messages
 
 
-def get_conversation_summary(run_id: int) -> str | None:
+async def get_conversation_summary(run_id: int) -> str | None:
     """Get the running summary for older rounds."""
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT conversation_summary FROM ai_runs WHERE id = ?", (run_id,)
-    ).fetchone()
-    conn.close()
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "SELECT conversation_summary FROM ai_runs WHERE id = ?", (run_id,)
+        )
+        row = await cursor.fetchone()
     return row["conversation_summary"] if row else None
 
 
-def save_message(run_id: int, role: str, content: str, round_number: int):
+async def save_message(run_id: int, role: str, content: str, round_number: int):
     """Save a message to the ai_messages table."""
-    conn = get_connection()
-    conn.execute(
-        "INSERT INTO ai_messages (run_id, role, content, round_number) VALUES (?, ?, ?, ?)",
-        (run_id, role, content, round_number),
-    )
-    conn.commit()
-    conn.close()
+    async with get_connection() as conn:
+        await conn.execute(
+            "INSERT INTO ai_messages (run_id, role, content, round_number) VALUES (?, ?, ?, ?)",
+            (run_id, role, content, round_number),
+        )
+        await conn.commit()
 
 
-def get_current_round(run_id: int) -> int:
-    """Get the next round number for a run."""
-    conn = get_connection()
-    row = conn.execute(
-        "SELECT MAX(round_number) as max_round FROM ai_messages WHERE run_id = ?",
-        (run_id,),
-    ).fetchone()
-    conn.close()
-    current = row["max_round"] if row and row["max_round"] is not None else 0
-    return current + 1
+async def start_new_round(run_id: int, role: str, content: str) -> int:
+    """Atomically compute next round number and insert the message. Returns the round number."""
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "INSERT INTO ai_messages (run_id, role, content, round_number) "
+            "VALUES (?, ?, ?, COALESCE((SELECT MAX(round_number) FROM ai_messages WHERE run_id = ?), 0) + 1) "
+            "RETURNING round_number",
+            (run_id, role, content, run_id),
+        )
+        row = await cursor.fetchone()
+        await conn.commit()
+    return row["round_number"]
 
 
-def summarize_old_rounds(run_id: int, llm):
+async def get_current_round(run_id: int) -> int:
+    """Get the current max round number for a run (0 if no messages)."""
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "SELECT MAX(round_number) as max_round FROM ai_messages WHERE run_id = ?",
+            (run_id,),
+        )
+        row = await cursor.fetchone()
+    return row["max_round"] if row and row["max_round"] is not None else 0
+
+
+async def summarize_old_rounds(run_id: int, llm):
     """Summarize rounds beyond MAX_RAW_ROUNDS and update the running summary."""
-    conn = get_connection()
-
-    rows = conn.execute(
-        "SELECT DISTINCT round_number FROM ai_messages WHERE run_id = ? ORDER BY round_number",
-        (run_id,),
-    ).fetchall()
+    # Step 1: READ -- get all round numbers (connection closes after block)
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "SELECT DISTINCT round_number FROM ai_messages WHERE run_id = ? ORDER BY round_number",
+            (run_id,),
+        )
+        rows = await cursor.fetchall()
     all_rounds = [r["round_number"] for r in rows]
 
     if len(all_rounds) <= MAX_RAW_ROUNDS:
-        conn.close()
         return
 
     rounds_to_summarize = all_rounds[: -MAX_RAW_ROUNDS]
 
+    # Step 2: READ -- get messages for those rounds (connection closes after block)
     placeholders = ",".join("?" * len(rounds_to_summarize))
-    messages = conn.execute(
-        f"SELECT role, content, round_number FROM ai_messages "
-        f"WHERE run_id = ? AND round_number IN ({placeholders}) "
-        f"ORDER BY round_number, id",
-        [run_id] + rounds_to_summarize,
-    ).fetchall()
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            f"SELECT role, content, round_number FROM ai_messages "
+            f"WHERE run_id = ? AND round_number IN ({placeholders}) "
+            f"ORDER BY round_number, id",
+            [run_id] + rounds_to_summarize,
+        )
+        messages = await cursor.fetchall()
 
     if not messages:
-        conn.close()
         return
 
-    existing_summary = get_conversation_summary(run_id)
+    existing_summary = await get_conversation_summary(run_id)
     text_to_summarize = ""
     if existing_summary:
         text_to_summarize += f"Previous summary:\n{existing_summary}\n\n"
@@ -108,16 +122,18 @@ def summarize_old_rounds(run_id: int, llm):
         f"{text_to_summarize}"
     )
 
-    response = llm.invoke(summary_prompt)
+    # Step 3: LLM call -- NO connection held
+    response = await llm.ainvoke(summary_prompt)
     new_summary = response.content if hasattr(response, "content") else str(response)
 
-    conn.execute(
-        "UPDATE ai_runs SET conversation_summary = ? WHERE id = ?",
-        (new_summary, run_id),
-    )
-    conn.execute(
-        f"DELETE FROM ai_messages WHERE run_id = ? AND round_number IN ({placeholders})",
-        [run_id] + rounds_to_summarize,
-    )
-    conn.commit()
-    conn.close()
+    # Step 4: WRITE -- new connection for updates
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE ai_runs SET conversation_summary = ? WHERE id = ?",
+            (new_summary, run_id),
+        )
+        await conn.execute(
+            f"DELETE FROM ai_messages WHERE run_id = ? AND round_number IN ({placeholders})",
+            [run_id] + rounds_to_summarize,
+        )
+        await conn.commit()

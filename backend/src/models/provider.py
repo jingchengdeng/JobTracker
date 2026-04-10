@@ -9,6 +9,10 @@ from langchain_anthropic import ChatAnthropic
 from src.auth.credentials import load_credential, load_model_config
 from src.models.registry import get_provider
 
+# Shared httpx clients for codex-responses provider to avoid leaking per-call
+_codex_sync_client: httpx.Client | None = None
+_codex_async_client: httpx.AsyncClient | None = None
+
 
 def _extract_chatgpt_account_id(jwt_token: str) -> str:
     """Parse chatgpt_account_id from the payload of an OpenAI OAuth JWT.
@@ -85,9 +89,9 @@ def _codex_rewrite_request(request: httpx.Request) -> None:
     request.headers["content-length"] = str(len(new_content))
 
 
-def _create_chat_model(provider_id: str, model: str) -> BaseChatModel:
+async def _create_chat_model(provider_id: str, model: str) -> BaseChatModel:
     provider = get_provider(provider_id)
-    profile = load_credential(provider_id)
+    profile = await load_credential(provider_id)
     if not profile:
         hint = "Connect via Settings > Auth" if provider["auth"] == "oauth" else "Add one in Settings or .env"
         raise ValueError(
@@ -121,14 +125,19 @@ def _create_chat_model(provider_id: str, model: str) -> BaseChatModel:
             # messages LangChain put into `input` up into `instructions`.
             kwargs["model_kwargs"] = {"instructions": "You are a helpful assistant."}
             kwargs["store"] = False
-            kwargs["http_client"] = httpx.Client(
-                event_hooks={"request": [_codex_rewrite_request]},
-                timeout=httpx.Timeout(60.0, connect=10.0),
-            )
-            kwargs["http_async_client"] = httpx.AsyncClient(
-                event_hooks={"request": [_async_codex_rewrite_request]},
-                timeout=httpx.Timeout(60.0, connect=10.0),
-            )
+            global _codex_sync_client, _codex_async_client
+            if _codex_sync_client is None:
+                _codex_sync_client = httpx.Client(
+                    event_hooks={"request": [_codex_rewrite_request]},
+                    timeout=httpx.Timeout(60.0, connect=10.0),
+                )
+            if _codex_async_client is None:
+                _codex_async_client = httpx.AsyncClient(
+                    event_hooks={"request": [_async_codex_rewrite_request]},
+                    timeout=httpx.Timeout(60.0, connect=10.0),
+                )
+            kwargs["http_client"] = _codex_sync_client
+            kwargs["http_async_client"] = _codex_async_client
         return ChatOpenAI(**kwargs)
 
     if provider["client"] == "anthropic":
@@ -140,25 +149,25 @@ def _create_chat_model(provider_id: str, model: str) -> BaseChatModel:
     raise ValueError(f"Unknown client type: {provider['client']}")
 
 
-def get_chat_model(role: str = "default") -> BaseChatModel:
-    config = load_model_config()
+async def get_chat_model(role: str = "default") -> BaseChatModel:
+    config = await load_model_config()
     role_config = config[role]
     try:
-        return _create_chat_model(role_config["provider"], role_config["model"])
+        return await _create_chat_model(role_config["provider"], role_config["model"])
     except Exception:
         fallback = role_config.get("fallback")
         if fallback:
-            return _create_chat_model(fallback["provider"], fallback["model"])
+            return await _create_chat_model(fallback["provider"], fallback["model"])
         raise
 
 
-def get_classifier_model() -> BaseChatModel:
-    return get_chat_model("classifier")
+async def get_classifier_model() -> BaseChatModel:
+    return await get_chat_model("classifier")
 
 
-def get_interview_model() -> BaseChatModel:
-    return get_chat_model("interview")
+async def get_interview_model() -> BaseChatModel:
+    return await get_chat_model("interview")
 
 
-def get_linkedin_model() -> BaseChatModel:
-    return get_chat_model("linkedin")
+async def get_linkedin_model() -> BaseChatModel:
+    return await get_chat_model("linkedin")

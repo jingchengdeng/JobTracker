@@ -33,62 +33,61 @@ class ResumeAgentState(TypedDict):
     round_number: int
 
 
-def _update_step_status(
+async def _update_step_status(
     run_id: int, step_type: str, status: str, result: str | None = None, round_number: int = 0
 ):
     """Update or create a step record in the database."""
-    conn = get_connection()
-
-    existing = conn.execute(
-        "SELECT id, version FROM ai_steps WHERE run_id = ? AND step_type = ? ORDER BY version DESC LIMIT 1",
-        (run_id, step_type),
-    ).fetchone()
-
-    if existing and status == "running":
-        conn.execute(
-            "INSERT INTO ai_steps (run_id, step_type, status, version, round_number) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (run_id, step_type, status, existing["version"] + 1, round_number),
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "SELECT id, version FROM ai_steps WHERE run_id = ? AND step_type = ? ORDER BY version DESC LIMIT 1",
+            (run_id, step_type),
         )
-    elif existing:
-        # UPDATE targets the latest-version row, which was INSERTed at "running"
-        # with the correct round_number. No need to overwrite it here.
-        conn.execute(
-            "UPDATE ai_steps SET status = ?, result = ?, completed_at = datetime('now') WHERE id = ?",
-            (status, result, existing["id"]),
-        )
-    else:
-        conn.execute(
-            "INSERT INTO ai_steps (run_id, step_type, status, result, round_number) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (run_id, step_type, status, result, round_number),
-        )
+        existing = await cursor.fetchone()
 
-    conn.commit()
-    conn.close()
+        if existing and status == "running":
+            await conn.execute(
+                "INSERT INTO ai_steps (run_id, step_type, status, version, round_number) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (run_id, step_type, status, existing["version"] + 1, round_number),
+            )
+        elif existing:
+            # UPDATE targets the latest-version row, which was INSERTed at "running"
+            # with the correct round_number. No need to overwrite it here.
+            await conn.execute(
+                "UPDATE ai_steps SET status = ?, result = ?, completed_at = datetime('now') WHERE id = ?",
+                (status, result, existing["id"]),
+            )
+        else:
+            await conn.execute(
+                "INSERT INTO ai_steps (run_id, step_type, status, result, round_number) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (run_id, step_type, status, result, round_number),
+            )
+
+        await conn.commit()
 
 
 def _wrap_step(step_type: str, step_fn):
     """Wrap a pipeline step to track status in the database."""
-    def wrapped(state: ResumeAgentState) -> ResumeAgentState:
+    async def wrapped(state: ResumeAgentState) -> ResumeAgentState:
         run_id = state["run_id"]
         round_number = state["round_number"]
-        _update_step_status(run_id, step_type, "running", round_number=round_number)
+        await _update_step_status(run_id, step_type, "running", round_number=round_number)
         try:
-            new_state = step_fn(state)
+            new_state = await step_fn(state)
             result_key = {
                 "jd_analysis": "jd_analysis",
                 "gap_analysis": "gap_analysis",
                 "suggestions": "suggestions",
                 "rewrite": "rewrite",
             }.get(step_type, step_type)
-            _update_step_status(
+            await _update_step_status(
                 run_id, step_type, "completed",
                 result=new_state.get(result_key), round_number=round_number,
             )
             return new_state
         except Exception as e:
-            _update_step_status(run_id, step_type, "failed", result=str(e), round_number=round_number)
+            await _update_step_status(run_id, step_type, "failed", result=str(e), round_number=round_number)
             raise
     return wrapped
 
@@ -193,7 +192,30 @@ def _format_pipeline_error(exc: Exception) -> str:
     return msg
 
 
-def run_pipeline(
+async def create_ai_run(state: ResumeAgentState) -> ResumeAgentState:
+    """Graph node: create ai_runs record, set status to running."""
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "INSERT INTO ai_runs (job_id, resume_id, status) VALUES (?, ?, 'running')",
+            (state["job_id"], state["resume_id"]),
+        )
+        run_id = cursor.lastrowid
+        await conn.commit()
+    return {**state, "run_id": run_id}
+
+
+async def complete_ai_run(state: ResumeAgentState) -> ResumeAgentState:
+    """Graph node: mark ai_runs as completed."""
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE ai_runs SET status = 'completed', completed_at = datetime('now') WHERE id = ?",
+            (state["run_id"],),
+        )
+        await conn.commit()
+    return state
+
+
+async def run_pipeline(
     run_id: int,
     job_id: int,
     resume_id: int,
@@ -215,12 +237,11 @@ def run_pipeline(
     must call `classify_followup` themselves and pass the resulting booleans +
     round_number.
     """
-    conn = get_connection()
-    conn.execute(
-        "UPDATE ai_runs SET status = 'running' WHERE id = ?", (run_id,)
-    )
-    conn.commit()
-    conn.close()
+    async with get_connection() as conn:
+        await conn.execute(
+            "UPDATE ai_runs SET status = 'running' WHERE id = ?", (run_id,)
+        )
+        await conn.commit()
 
     state = {
         "job_id": job_id,
@@ -244,24 +265,22 @@ def run_pipeline(
     }
 
     try:
-        result = workflow.invoke(state)
+        result = await workflow.ainvoke(state)
 
-        conn = get_connection()
-        conn.execute(
-            "UPDATE ai_runs SET status = 'completed', completed_at = datetime('now') WHERE id = ?",
-            (run_id,),
-        )
-        conn.commit()
-        conn.close()
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE ai_runs SET status = 'completed', completed_at = datetime('now') WHERE id = ?",
+                (run_id,),
+            )
+            await conn.commit()
 
         return result
 
     except Exception as e:
-        conn = get_connection()
-        conn.execute(
-            "UPDATE ai_runs SET status = 'failed', error = ? WHERE id = ?",
-            (_format_pipeline_error(e), run_id),
-        )
-        conn.commit()
-        conn.close()
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE ai_runs SET status = 'failed', error = ? WHERE id = ?",
+                (_format_pipeline_error(e), run_id),
+            )
+            await conn.commit()
         raise

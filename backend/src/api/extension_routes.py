@@ -1,7 +1,10 @@
+import asyncio
 import os
 import re
 import logging
 from pathlib import Path
+
+import aiofiles
 from urllib.parse import urlparse
 
 import httpx
@@ -9,10 +12,13 @@ from fastapi import APIRouter
 from pydantic import BaseModel
 
 from src.agents.extraction_pipeline import run_extraction_pipeline
+from src.agents.master_workflow import resolve_default_resume, fan_out, resume_branch, linkedin_branch
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/extension")
+
+_background_tasks: set[asyncio.Task] = set()
 
 DEFAULT_EXTRACTIONS_DIR = os.path.join(
     os.path.dirname(__file__), "..", "..", "..", "data", "extractions"
@@ -92,7 +98,8 @@ async def extract(req: ExtractRequest):
     filepath = extractions_dir / filename
 
     content = _format_extraction(req)
-    filepath.write_text(content, encoding="utf-8")
+    async with aiofiles.open(filepath, "w", encoding="utf-8") as f:
+        await f.write(content)
 
     logger.info("Saved extraction to %s", filepath)
 
@@ -120,6 +127,7 @@ async def extract(req: ExtractRequest):
     # Run LLM extraction pipeline
     job_id = None
     extraction_error = None
+    pipeline_result = {}
     try:
         pipeline_result = await run_extraction_pipeline(req.rawPanelText, req.url)
         job_id = pipeline_result.get("job_id")
@@ -129,6 +137,38 @@ async def extract(req: ExtractRequest):
     except Exception as exc:
         logger.error("Extraction pipeline failed: %s", exc)
         extraction_error = str(exc)
+
+    # Fire-and-forget: fan out to resume tailor + LinkedIn research
+    if job_id and not extraction_error:
+        async def _fan_out_background():
+            try:
+                resume_state = await resolve_default_resume({"job_id": job_id})
+
+                extracted = pipeline_result.get("extracted") or {}
+
+                full_state = {
+                    "job_id": job_id,
+                    "extracted": {"description": extracted.get("description")} if extracted else None,
+                    "default_resume_id": resume_state.get("default_resume_id"),
+                    "default_resume_text": resume_state.get("default_resume_text"),
+                    "default_resume_name": resume_state.get("default_resume_name"),
+                }
+                sends = fan_out(full_state)
+
+                tasks = []
+                for send in sends:
+                    if send.node == "resume_branch":
+                        tasks.append(resume_branch(send.arg))
+                    elif send.node == "linkedin_branch":
+                        tasks.append(linkedin_branch(send.arg))
+                if tasks:
+                    await asyncio.gather(*tasks)
+            except Exception as exc:
+                logger.error("Fan-out background failed: %s", exc)
+
+        task = asyncio.create_task(_fan_out_background())
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
     result = {"success": True, "filename": filename, "job_id": job_id}
     if extraction_error:

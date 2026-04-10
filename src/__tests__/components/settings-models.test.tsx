@@ -27,6 +27,8 @@ const MOCK_CONFIG = {
   default: { provider: "openai", model: "gpt-5.4", fallback: null },
   classifier: { provider: "openai", model: "gpt-4o-mini", fallback: null },
   embedding: { provider: "openai", model: "text-embedding-3-small", fallback: null },
+  interview: { provider: "openai", model: "gpt-5.4-mini", fallback: null },
+  linkedin: { provider: "openai", model: "gpt-4o-mini", fallback: null },
 };
 
 const MOCK_AUTH_PROFILES = [
@@ -59,13 +61,15 @@ beforeEach(() => {
 });
 
 describe("SettingsModels", () => {
-  it("renders three role cards after loading", async () => {
+  it("renders all five role cards after loading", async () => {
     render(<SettingsModels />);
     await waitFor(() => {
       expect(screen.getByText("Default Model")).toBeInTheDocument();
     });
     expect(screen.getByText("Classifier Model")).toBeInTheDocument();
     expect(screen.getByText("Embedding Model")).toBeInTheDocument();
+    expect(screen.getByText("Interview Model")).toBeInTheDocument();
+    expect(screen.getByText("LinkedIn Search Model")).toBeInTheDocument();
   });
 
   it("renders save button", async () => {

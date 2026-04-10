@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import fs from "fs";
+import fs from "fs/promises";
 import path from "path";
 
 const CONFIG_FILE = path.join(process.cwd(), "data", "model-config.json");
@@ -58,24 +58,25 @@ function migrateConfig(raw: Record<string, unknown>): ModelConfig {
   };
 }
 
-function readConfig(): ModelConfig {
-  if (!fs.existsSync(CONFIG_FILE)) {
+async function readConfig(): Promise<ModelConfig> {
+  try {
+    const content = await fs.readFile(CONFIG_FILE, "utf-8");
+    return migrateConfig(JSON.parse(content));
+  } catch {
     return { ...DEFAULT_CONFIG };
   }
-  const raw = JSON.parse(fs.readFileSync(CONFIG_FILE, "utf-8"));
-  return migrateConfig(raw);
 }
 
-function writeConfig(config: ModelConfig) {
+async function writeConfig(config: ModelConfig) {
   const dir = path.dirname(CONFIG_FILE);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
+  await fs.mkdir(dir, { recursive: true });
+  const tmpFile = CONFIG_FILE + ".tmp";
+  await fs.writeFile(tmpFile, JSON.stringify(config, null, 2));
+  await fs.rename(tmpFile, CONFIG_FILE);
 }
 
 export async function GET() {
-  return NextResponse.json(readConfig());
+  return NextResponse.json(await readConfig());
 }
 
 export async function PUT(request: NextRequest) {
@@ -107,6 +108,6 @@ export async function PUT(request: NextRequest) {
       fallback: body.linkedin?.fallback ?? null,
     },
   };
-  writeConfig(config);
+  await writeConfig(config);
   return NextResponse.json(config);
 }

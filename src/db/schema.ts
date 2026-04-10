@@ -48,7 +48,7 @@ export const jobs = sqliteTable("jobs", {
 
 export const goals = sqliteTable("goals", {
   id: integer().primaryKey({ autoIncrement: true }),
-  type: text({ enum: GOAL_TYPES }).notNull(),
+  type: text({ enum: GOAL_TYPES }).notNull().unique(),
   target: integer().notNull(),
   periodStart: text("period_start").notNull(),
   createdAt: text("created_at")
@@ -66,6 +66,7 @@ export const resumes = sqliteTable("resumes", {
   lastIndexSignature: text("last_index_signature"),
   lastIndexStatus: text("last_index_status", { enum: ["ok", "failed", "pending"] }),
   lastIndexError: text("last_index_error"),
+  isDefault: integer("is_default").notNull().default(0),
   createdAt: text("created_at")
     .notNull()
     .default(sql`(datetime('now'))`),
@@ -171,6 +172,7 @@ export const interviewResults = sqliteTable("interview_results", {
   id: integer().primaryKey({ autoIncrement: true }),
   sessionId: integer("session_id")
     .notNull()
+    .unique()
     .references(() => interviewSessions.id),
   overallScore: integer("overall_score").notNull(),
   dimensionScoresJson: text("dimension_scores_json").notNull(),

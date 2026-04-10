@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 import httpx
@@ -110,7 +111,7 @@ GENERAL RULES:
 
 
 async def extract_fields(state: ExtractionState) -> ExtractionState:
-    llm = get_linkedin_model()
+    llm = await get_linkedin_model()
     structured_llm = llm.with_structured_output(LinkedInJobExtraction, method="function_calling")
 
     raw_text = state["raw_text"]
@@ -217,6 +218,9 @@ def build_extraction_graph() -> StateGraph:
     return graph
 
 
+_compiled_extraction_graph = build_extraction_graph().compile()
+
+
 async def run_extraction_pipeline(raw_text: str, url: str) -> dict:
     initial_state: ExtractionState = {
         "raw_text": raw_text,
@@ -229,9 +233,8 @@ async def run_extraction_pipeline(raw_text: str, url: str) -> dict:
     }
 
     try:
-        compiled = build_extraction_graph().compile()
-        result = await compiled.ainvoke(initial_state)
-        return {"job_id": result.get("job_id"), "error": result.get("error")}
+        result = await _compiled_extraction_graph.ainvoke(initial_state)
+        return {"job_id": result.get("job_id"), "error": result.get("error"), "extracted": result.get("extracted")}
     except Exception as exc:
         logger.error("Pipeline exception: %s: %s", type(exc).__name__, exc)
-        return {"job_id": None, "error": str(exc)}
+        return {"job_id": None, "error": str(exc), "extracted": None}

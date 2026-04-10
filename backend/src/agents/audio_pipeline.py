@@ -13,18 +13,22 @@ from src.auth.credentials import load_api_key
 logger = logging.getLogger(__name__)
 
 _client: AsyncOpenAI | None = None
+_client_key: str | None = None
+_client_lock = asyncio.Lock()
 
 
-def _get_openai_client() -> AsyncOpenAI:
-    global _client
-    if _client is None:
-        api_key = load_api_key("openai")
-        _client = AsyncOpenAI(api_key=api_key)
-    return _client
+async def _get_openai_client() -> AsyncOpenAI:
+    global _client, _client_key
+    api_key = await load_api_key("openai")
+    async with _client_lock:
+        if _client is None or api_key != _client_key:
+            _client = AsyncOpenAI(api_key=api_key)
+            _client_key = api_key
+        return _client
 
 
 async def transcribe_audio(audio_bytes: bytes) -> str | None:
-    client = _get_openai_client()
+    client = await _get_openai_client()
     audio_file = io.BytesIO(audio_bytes)
     audio_file.name = "audio.webm"
 
@@ -37,14 +41,18 @@ async def transcribe_audio(audio_bytes: bytes) -> str | None:
 
 
 async def synthesize_speech(text: str, voice: str) -> AsyncIterator[bytes]:
-    client = _get_openai_client()
+    client = await _get_openai_client()
     response = await asyncio.wait_for(
         client.audio.speech.create(model=TTS_MODEL, voice=voice, input=text, response_format="mp3"),
         timeout=15.0,
     )
     stream = await response.aiter_bytes(chunk_size=4096)
+    deadline = asyncio.get_event_loop().time() + 30.0
     async for chunk in stream:
         yield chunk
+        if asyncio.get_event_loop().time() > deadline:
+            logger.warning("TTS streaming exceeded 30s deadline, aborting")
+            break
 
 
 async def process_audio_turn(session_id: int, audio_bytes: bytes, voice: str) -> tuple[TurnResponse, str]:
@@ -61,10 +69,9 @@ async def process_audio_turn(session_id: int, audio_bytes: bytes, voice: str) ->
             interviewer_message="I didn't quite catch that. Could you repeat your answer?",
         ), "I didn't quite catch that. Could you repeat your answer?"
 
-    # 2. Turn function in thread executor
-    loop = asyncio.get_event_loop()
+    # 2. Turn function (now async)
     turn_response = await asyncio.wait_for(
-        loop.run_in_executor(None, lambda: process_interview_turn(session_id, transcript)),
+        process_interview_turn(session_id, transcript),
         timeout=30.0,
     )
 

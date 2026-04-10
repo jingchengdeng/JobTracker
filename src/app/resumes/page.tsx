@@ -36,6 +36,19 @@ export default function ResumesPage() {
     }
   }
 
+  async function handleSetDefault(id: number) {
+    setResumes((prev) =>
+      prev.map((r) => ({ ...r, isDefault: r.id === id ? 1 : 0 }))
+    );
+    try {
+      const res = await fetch(`/api/resumes/${id}/default`, { method: "PATCH" });
+      if (!res.ok) throw new Error("Failed to set default resume");
+    } catch (err) {
+      console.error(err);
+      await fetchResumes();
+    }
+  }
+
   async function handleReindex(resumeIds?: number[]) {
     try {
       const res = await fetch("/api/ai/embedding/reindex", {
@@ -90,6 +103,7 @@ export default function ResumesPage() {
                 key={resume.id}
                 resume={resume}
                 onDelete={handleDelete}
+                onSetDefault={handleSetDefault}
                 embeddingStatus={statusRow ?? null}
                 activeSignature={embeddingStatus?.active_signature ?? null}
                 configuredSignature={embeddingStatus?.configured_signature ?? ""}

@@ -1,12 +1,9 @@
+import asyncio
 import logging
-import os
 import re
-from pathlib import Path
-
-import chromadb
 
 from src.db import get_connection
-from src.memory.collection_resolver import active_collection, collection_for_signature
+from src.memory.collection_resolver import active_collection
 from src.memory.embedding_state import get_active_signature
 from src.memory.signatures import collection_name_for
 
@@ -15,60 +12,51 @@ logger = logging.getLogger("jobtracker.rag")
 COLLECTION_NAME = "resume_chunks"  # legacy (pre-signature) collection name
 
 
-def index_resume(resume_id: int, resume_name: str, extracted_text: str):
+async def index_resume(resume_id: int, resume_name: str, extracted_text: str):
     """Index a resume into the active collection and persist its state.
 
     No-op if no active signature yet (first-run before any reindex). The
     caller is expected to trigger a reindex after initial upload in that case.
     """
-    col = active_collection()
+    col = await active_collection()
     if col is None:
         return
-    active_sig = get_active_signature()
+    active_sig = await get_active_signature()
     try:
-        index_resume_into(col, resume_id, resume_name, extracted_text)
+        await index_resume_into(col, resume_id, resume_name, extracted_text)
     except Exception as exc:
-        mark_resume_failed(resume_id, str(exc))
+        await mark_resume_failed(resume_id, str(exc))
         raise
     if active_sig is not None:
-        mark_resume_ok(resume_id, active_sig)
+        await mark_resume_ok(resume_id, active_sig)
 
 
-def mark_resume_ok(resume_id: int, signature: str) -> None:
-    conn = get_connection()
-    try:
-        conn.execute(
+async def mark_resume_ok(resume_id: int, signature: str) -> None:
+    async with get_connection() as conn:
+        await conn.execute(
             "UPDATE resumes SET last_index_signature = ?, last_index_status = 'ok', "
             "last_index_error = NULL WHERE id = ?",
             (signature, resume_id),
         )
-        conn.commit()
-    finally:
-        conn.close()
+        await conn.commit()
 
 
-def mark_resume_failed(resume_id: int, error: str) -> None:
-    conn = get_connection()
-    try:
-        conn.execute(
+async def mark_resume_failed(resume_id: int, error: str) -> None:
+    async with get_connection() as conn:
+        await conn.execute(
             "UPDATE resumes SET last_index_status = 'failed', last_index_error = ? "
             "WHERE id = ?",
             (error, resume_id),
         )
-        conn.commit()
-    finally:
-        conn.close()
+        await conn.commit()
 
 
-def index_resume_into(collection, resume_id: int, resume_name: str, extracted_text: str):
-    """Index a resume into a specific Chroma collection.
-
-    Removes any existing chunks for this resume_id first, then adds fresh chunks.
-    """
+async def index_resume_into(collection, resume_id: int, resume_name: str, extracted_text: str):
+    """Index a resume into a specific Chroma collection."""
     try:
-        existing = collection.get(where={"resume_id": resume_id})
+        existing = await collection.get(where={"resume_id": resume_id})
         if existing["ids"]:
-            collection.delete(ids=existing["ids"])
+            await collection.delete(ids=existing["ids"])
     except Exception:
         pass
 
@@ -91,29 +79,29 @@ def index_resume_into(collection, resume_id: int, resume_name: str, extracted_te
             "raw_text": chunk["text"],
         })
 
-    collection.add(ids=ids, documents=documents, metadatas=metadatas)
+    await collection.add(ids=ids, documents=documents, metadatas=metadatas)
 
 
-def delete_resume_chunks(resume_id: int) -> int:
+async def delete_resume_chunks(resume_id: int) -> int:
     """Delete all chunks for a resume. Returns the number removed."""
-    col = active_collection()
+    col = await active_collection()
     if col is None:
         return 0
-    existing = col.get(where={"resume_id": resume_id})
+    existing = await col.get(where={"resume_id": resume_id})
     ids = existing["ids"] if existing else []
     if ids:
-        col.delete(ids=ids)
+        await col.delete(ids=ids)
     return len(ids)
 
 
-def query_resume_corpus(query: str, n_results: int = 10, filters: dict | None = None):
+async def query_resume_corpus(query: str, n_results: int = 10, filters: dict | None = None):
     """Query the active collection for relevant experience chunks."""
-    col = active_collection()
+    col = await active_collection()
     if col is None:
         return []
 
     where = filters if filters else None
-    results = col.query(query_texts=[query], n_results=n_results, where=where)
+    results = await col.query(query_texts=[query], n_results=n_results, where=where)
 
     chunks = []
     if results and results["documents"]:
@@ -192,7 +180,7 @@ def _chunk_resume(text: str) -> list[dict]:
     return [c for c in chunks if len(c["text"]) > 20]
 
 
-def reconcile_resume_index_state() -> None:
+async def reconcile_resume_index_state() -> None:
     """Heal drift between SQL per-resume index state and real Chroma contents.
 
     Run at startup. Two passes:
@@ -201,22 +189,20 @@ def reconcile_resume_index_state() -> None:
       2. Any resume with a NULL signature whose chunks DO exist in the active
          collection is marked ok with the active signature.
     """
-    vectordb_path = os.environ.get(
-        "VECTORDB_PATH",
-        str(Path(__file__).parent.parent.parent.parent / "data" / "vectordb"),
-    )
+    from src.memory.collection_resolver import _client
+    from src.memory.embedding_state import get_active_signature as _get_active_sig
+
     try:
-        client = chromadb.PersistentClient(path=vectordb_path)
-        existing = {c.name for c in client.list_collections()}
+        client = await _client()
+        collections = await client.list_collections()
+        existing = {c.name for c in collections}
     except Exception as exc:
         logger.warning("reconcile: could not list Chroma collections: %s", exc)
         existing = set()
 
-    conn = get_connection()
-    try:
-        rows = conn.execute(
-            "SELECT id, last_index_signature FROM resumes"
-        ).fetchall()
+    async with get_connection() as conn:
+        cursor = await conn.execute("SELECT id, last_index_signature FROM resumes")
+        rows = await cursor.fetchall()
 
         # Phase 1: clear orphan signatures
         cleared = 0
@@ -225,46 +211,46 @@ def reconcile_resume_index_state() -> None:
             if sig is None:
                 continue
             if collection_name_for(sig) not in existing:
-                conn.execute(
+                await conn.execute(
                     "UPDATE resumes SET last_index_signature = NULL, "
                     "last_index_status = NULL, last_index_error = NULL WHERE id = ?",
                     (r["id"],),
                 )
                 cleared += 1
         if cleared:
-            conn.commit()
+            await conn.commit()
             logger.info("reconcile: cleared %d orphan resume signature(s)", cleared)
 
-        # Phase 2: heal NULL signatures against active collection
-        active_sig = get_active_signature()
-        if active_sig is None:
-            return
-        active_name = collection_name_for(active_sig)
-        if active_name not in existing:
-            return
-        try:
-            col = client.get_collection(name=active_name)
-            result = col.get(include=["metadatas"])
-        except Exception as exc:
-            logger.warning("reconcile: could not read active collection: %s", exc)
-            return
+    # Phase 2: heal NULL signatures against active collection
+    active_sig = await _get_active_sig()
+    if active_sig is None:
+        return
+    active_name = collection_name_for(active_sig)
+    if active_name not in existing:
+        return
 
-        resume_ids_in_chroma: set[int] = set()
-        for md in result.get("metadatas") or []:
-            if md and md.get("resume_id") is not None:
-                resume_ids_in_chroma.add(md["resume_id"])
-        if not resume_ids_in_chroma:
-            return
+    try:
+        col = await client.get_collection(name=active_name)
+        result = await col.get(include=["metadatas"])
+    except Exception as exc:
+        logger.warning("reconcile: could not read active collection: %s", exc)
+        return
 
+    resume_ids_in_chroma: set[int] = set()
+    for md in result.get("metadatas") or []:
+        if md and md.get("resume_id") is not None:
+            resume_ids_in_chroma.add(md["resume_id"])
+    if not resume_ids_in_chroma:
+        return
+
+    async with get_connection() as conn:
         placeholders = ",".join("?" * len(resume_ids_in_chroma))
-        cur = conn.execute(
+        cursor = await conn.execute(
             f"UPDATE resumes SET last_index_signature = ?, "
             f"last_index_status = 'ok', last_index_error = NULL "
             f"WHERE last_index_signature IS NULL AND id IN ({placeholders})",
             (active_sig, *resume_ids_in_chroma),
         )
-        if cur.rowcount:
-            conn.commit()
-            logger.info("reconcile: healed %d NULL resume signature(s)", cur.rowcount)
-    finally:
-        conn.close()
+        if cursor.rowcount:
+            await conn.commit()
+            logger.info("reconcile: healed %d NULL resume signature(s)", cursor.rowcount)
