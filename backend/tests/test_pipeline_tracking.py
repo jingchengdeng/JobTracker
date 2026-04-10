@@ -113,3 +113,29 @@ async def test_subscriber_aclose_detaches_immediately():
     assert 99 in bus._subscribers
     await stream.aclose()
     assert 99 not in bus._subscribers or not bus._subscribers[99]
+
+
+def test_format_pipeline_error_shortens_cloudflare_bodies():
+    from src.agents.pipeline_tracking import _format_pipeline_error
+
+    exc = RuntimeError("<html><body>cloudflare challenge page</body></html>")
+    msg = _format_pipeline_error(exc)
+    assert "challenge page" in msg
+    assert "<html" not in msg
+
+
+def test_format_pipeline_error_truncates_long_messages():
+    from src.agents.pipeline_tracking import _format_pipeline_error
+
+    exc = RuntimeError("x" * 1000)
+    msg = _format_pipeline_error(exc)
+    assert len(msg) <= 503  # 500 + "..."
+    assert msg.endswith("...")
+
+
+def test_format_pipeline_error_passes_short_messages_through():
+    from src.agents.pipeline_tracking import _format_pipeline_error
+
+    exc = ValueError("bad input")
+    msg = _format_pipeline_error(exc)
+    assert msg == "bad input"

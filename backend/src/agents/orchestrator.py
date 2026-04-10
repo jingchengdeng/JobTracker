@@ -10,6 +10,7 @@ from src.agents.resume_agent import (
     step_rewrite,
 )
 from src.db import get_connection
+from src.agents.pipeline_tracking import _format_pipeline_error
 
 
 class ResumeAgentState(TypedDict):
@@ -168,28 +169,6 @@ def build_graph() -> StateGraph:
 
 workflow = build_graph().compile()
 
-
-def _format_pipeline_error(exc: Exception) -> str:
-    """Shorten provider errors so the UI doesn't render raw HTML bodies.
-
-    Some providers (e.g. openai-codex -> chatgpt.com) respond with a Cloudflare
-    challenge page when the caller isn't authenticated the way they expect. The
-    OpenAI SDK includes the response body in the exception string, which then
-    leaks into ai_runs.error and the UI. Detect HTML bodies and replace with
-    a short, actionable message.
-    """
-    msg = str(exc)
-    lowered = msg.lower()
-    if "<html" in lowered or "cloudflare" in lowered or "cf_chl_opt" in lowered:
-        return (
-            "Provider returned a challenge page instead of an API response. "
-            "The configured provider appears to be unreachable from this app. "
-            "Switch the default chat provider in Settings to one with a valid API key."
-        )
-    # Keep errors to a reasonable length in the UI.
-    if len(msg) > 500:
-        return msg[:500] + "..."
-    return msg
 
 
 async def create_ai_run(state: ResumeAgentState) -> ResumeAgentState:
