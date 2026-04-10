@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI):
         from src.db_migrations import migrate_ai_steps_to_pipeline_events
         await migrate_ai_steps_to_pipeline_events()
     except Exception as exc:
-        logger.warning("pipeline_events migration skipped: %s", exc)
+        logger.exception("pipeline_events migration failed")
 
     # Async startup: mark interrupted runs as failed
     try:
@@ -112,7 +112,7 @@ async def lifespan(app: FastAPI):
             )
             await conn.commit()
     except Exception as exc:
-        logger.warning("pipeline_events recovery skipped: %s", exc)
+        logger.exception("pipeline_events startup recovery failed")
 
     try:
         async with get_connection() as conn:

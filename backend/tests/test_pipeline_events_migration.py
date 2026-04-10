@@ -81,6 +81,8 @@ async def test_migration_backfills_valid_rows(temp_db):
     assert rows[0]["step_type"] == "jd_analysis"
     assert rows[0]["version"] == 1
     assert rows[0]["round_number"] == 0
+    assert rows[0]["started_at"] is None
+    assert rows[0]["duration_ms"] is None
     assert ai_steps_still_exists is None
 
 
@@ -132,7 +134,12 @@ async def test_migration_is_idempotent(temp_db):
     async with aiosqlite.connect(temp_db) as conn:
         cursor = await conn.execute("SELECT COUNT(*) FROM pipeline_events")
         (count,) = await cursor.fetchone()
+        cursor = await conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='ai_steps'"
+        )
+        ai_steps_row = await cursor.fetchone()
     assert count == 1
+    assert ai_steps_row is None
 
 
 @pytest.mark.asyncio

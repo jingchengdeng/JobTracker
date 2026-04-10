@@ -54,6 +54,9 @@ async def migrate_ai_steps_to_pipeline_events() -> None:
     in place and the debug tab features disabled.
     """
     async with get_connection() as conn:
+        await conn.executescript(PIPELINE_EVENTS_DDL)
+        await conn.commit()
+
         cursor = await conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='ai_steps'"
         )
@@ -61,8 +64,6 @@ async def migrate_ai_steps_to_pipeline_events() -> None:
         await cursor.close()
         if not row:
             return
-
-        await conn.executescript(PIPELINE_EVENTS_DDL)
 
         cursor = await conn.execute("PRAGMA table_info(ai_steps)")
         cols = {r[1] for r in await cursor.fetchall()}
