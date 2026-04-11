@@ -34,6 +34,11 @@ class TrackBehavior(Enum):
 
 MAX_QUEUE = 100
 
+#: Populated at import time by the @track_node decorator. Used by the
+#: pipeline topology drift guard to cross-check extracted node ids against
+#: the set of nodes that actually emit events.
+TRACK_NODE_REGISTRY: set[tuple[str, str]] = set()
+
 
 @dataclass
 class PipelineEvent:
@@ -224,6 +229,7 @@ def track_node(graph: str, node_name: str, behavior: TrackBehavior = TrackBehavi
     state dict.
     """
     def decorator(fn):
+        TRACK_NODE_REGISTRY.add((graph, node_name))
         assert inspect.iscoroutinefunction(fn), (
             f"track_node requires an async function, got sync {fn.__name__}. "
             "Per the async-only policy, every pipeline function must be async."
