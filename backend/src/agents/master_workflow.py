@@ -80,6 +80,7 @@ async def fan_out(state: MasterWorkflowState) -> list[Send]:
     return sends
 
 
+@track_node("master", "resume_branch", TrackBehavior.SINGLE_SHOT)
 async def resume_branch(state: dict) -> dict:
     """Run the full resume tailor pipeline. MUST NOT raise."""
     run_id = None
@@ -117,6 +118,7 @@ async def resume_branch(state: dict) -> dict:
     return {}
 
 
+@track_node("master", "linkedin_branch", TrackBehavior.SINGLE_SHOT)
 async def linkedin_branch(state: dict) -> dict:
     """Run the LinkedIn research pipeline. MUST NOT raise."""
     try:
