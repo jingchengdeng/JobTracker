@@ -179,6 +179,10 @@ def build_master_graph() -> StateGraph:
     graph.add_conditional_edges(
         "resolve_default_resume",
         fan_out,
+        {
+            "resume_branch": "resume_branch",
+            "linkedin_branch": "linkedin_branch",
+        },
     )
     graph.add_edge("fail_node", END)
     graph.add_edge("resume_branch", END)
