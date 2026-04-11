@@ -36,29 +36,26 @@ class ResumeAgentState(TypedDict):
     round_number: int
 
 
-def _should_run(step_type: str):
-    """Create a conditional edge function for a step."""
-    flag_map = {
-        "jd_analysis": "needs_jd_analysis",
-        "rag_retrieval": "needs_gap_analysis",
-        "gap_analysis": "needs_gap_analysis",
-        "suggestions": "needs_suggestions",
-        "rewrite": "needs_rewrite",
-    }
-    flag = flag_map[step_type]
+# The pipeline has exactly one skip point: the entry. Each step's output
+# feeds the next (suggestions reads gap_analysis, rewrite reads suggestions),
+# so once we re-run a step N, every downstream step must also re-run —
+# otherwise rewrite would use stale suggestions derived from a gap analysis
+# that no longer exists. `_pick_entry_step` picks the earliest step whose
+# `needs_*` flag is True and the graph runs straight through from there.
+_ENTRY_ORDER: list[tuple[str, str]] = [
+    ("jd_analysis", "needs_jd_analysis"),
+    ("rag_retrieval", "needs_gap_analysis"),
+    ("gap_analysis", "needs_gap_analysis"),
+    ("suggestions", "needs_suggestions"),
+    ("rewrite", "needs_rewrite"),
+]
 
-    def check(state: ResumeAgentState) -> str:
+
+def _pick_entry_step(state: ResumeAgentState) -> str:
+    for step_name, flag in _ENTRY_ORDER:
         if state.get(flag, True):
-            return step_type
-        steps = ["jd_analysis", "rag_retrieval", "gap_analysis", "suggestions", "rewrite"]
-        current_idx = steps.index(step_type)
-        for next_step in steps[current_idx + 1:]:
-            next_flag = flag_map.get(next_step, "")
-            if state.get(next_flag, True):
-                return next_step
-        return "end"
-
-    return check
+            return step_name
+    return "end"
 
 
 def build_graph() -> StateGraph:
@@ -72,7 +69,7 @@ def build_graph() -> StateGraph:
     graph.add_node("rewrite", step_rewrite)
 
     graph.set_conditional_entry_point(
-        _should_run("jd_analysis"),
+        _pick_entry_step,
         {
             "jd_analysis": "jd_analysis",
             "rag_retrieval": "rag_retrieval",
@@ -85,26 +82,8 @@ def build_graph() -> StateGraph:
 
     graph.add_edge("jd_analysis", "rag_retrieval")
     graph.add_edge("rag_retrieval", "gap_analysis")
-
-    graph.add_conditional_edges(
-        "gap_analysis",
-        _should_run("suggestions"),
-        {
-            "suggestions": "suggestions",
-            "rewrite": "rewrite",
-            "end": END,
-        },
-    )
-
-    graph.add_conditional_edges(
-        "suggestions",
-        _should_run("rewrite"),
-        {
-            "rewrite": "rewrite",
-            "end": END,
-        },
-    )
-
+    graph.add_edge("gap_analysis", "suggestions")
+    graph.add_edge("suggestions", "rewrite")
     graph.add_edge("rewrite", END)
 
     return graph
