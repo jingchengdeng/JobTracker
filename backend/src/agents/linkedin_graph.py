@@ -30,13 +30,37 @@ from src.agents.linkedin_pipeline import (
     search_domain_google,
 )
 from src.agents.linkedin_search import (
-    brave_search_profiles, brave_search_domain, SEARCH_DELAY_SECONDS,
+    brave_search_profiles, brave_search_domain, run_google_search,
+    launch_stealth_browser, SEARCH_DELAY_SECONDS,
 )
 from src.agents.pipeline_tracking import track_node, TrackBehavior
 from src.auth.credentials import load_api_key
 from src.db import get_connection
 
 logger = logging.getLogger(__name__)
+
+# Rate-limit Brave API fan-out. Brave allows ~1 req/sec per key; with 6 possible
+# concurrent Brave calls per run (5 profile searches + domain search), bound the
+# in-flight count to 3.
+_brave_semaphore = asyncio.Semaphore(3)
+
+# Rate-limit Playwright/Google fan-out. Google aggressively CAPTCHAs parallel
+# requests from the same IP; keep at most 2 pages in flight.
+_playwright_semaphore = asyncio.Semaphore(2)
+
+SEARCH_TAGS = ("recruiter", "ta", "hiring_mgr", "hr", "leadership")
+
+
+def _query_for_tag(queries: list[dict] | None, tag: str) -> str | None:
+    """Return the query string for a given tag, or None if not present.
+
+    build_search_queries only emits the leadership query when analysis exists,
+    so 'leadership' may be absent in basic mode.
+    """
+    for q in queries or []:
+        if q.get("tag") == tag:
+            return q.get("query")
+    return None
 
 
 def _merge_results(a: dict | None, b: dict | None) -> dict:
@@ -240,6 +264,53 @@ async def save_results_node(state: LinkedinState) -> dict:
     await save_contacts(state["search_id"], state.get("ranked", []))
     await update_search_status(state["search_id"], "completed")
     return {}
+
+
+def make_brave_search_node(tag: str):
+    """Factory producing a Brave-backed search node for one query tag.
+
+    Each generated node is registered under a distinct name (``brave_<tag>``)
+    so the topology tab renders one box per tag and pipeline_events holds one
+    row per tag.
+    """
+
+    @track_node("linkedin", f"brave_{tag}", TrackBehavior.SINGLE_SHOT)
+    async def node(state: LinkedinState) -> dict:
+        query = _query_for_tag(state.get("queries"), tag)
+        brave_key = state.get("brave_key")
+        if not query or not brave_key:
+            return {}
+        async with _brave_semaphore:
+            try:
+                people = await brave_search_profiles(query, brave_key, 15)
+            except Exception:
+                logger.exception("brave_%s failed", tag)
+                people = []
+        return {"search_results": {tag: people}}
+
+    node.__name__ = f"brave_{tag}_node"
+    return node
+
+
+def make_browser_search_node(tag: str):
+    """Factory producing a Playwright-backed search node for one query tag."""
+
+    @track_node("linkedin", f"browser_{tag}", TrackBehavior.SINGLE_SHOT)
+    async def node(state: LinkedinState) -> dict:
+        query = _query_for_tag(state.get("queries"), tag)
+        browser = state.get("browser")
+        if not query or browser is None:
+            return {}
+        async with _playwright_semaphore:
+            try:
+                people = await run_google_search(browser, query)
+            except Exception:
+                logger.exception("browser_%s failed", tag)
+                people = []
+        return {"search_results": {tag: people}}
+
+    node.__name__ = f"browser_{tag}_node"
+    return node
 
 
 async def _analyze_jd_gate(state: LinkedinState) -> str:
