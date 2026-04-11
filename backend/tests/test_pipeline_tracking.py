@@ -241,6 +241,55 @@ async def test_track_node_treats_none_return_as_success(migrated_db):
 
 
 @pytest.mark.asyncio
+async def test_track_node_persists_node_result_payload(migrated_db):
+    """Regression: UI was showing empty cards because pipeline_events.result
+    stayed NULL after the orchestrator refactor moved from _wrap_step to
+    @track_node. track_node must persist result[node_name] to the `result`
+    column so the resume-tailor cards have something to render."""
+    from src.agents.pipeline_tracking import track_node, TrackBehavior
+    import aiosqlite
+
+    @track_node("resume", "jd_analysis", TrackBehavior.VERSION_ON_RERUN)
+    async def string_node(state):
+        return {**state, "jd_analysis": '{"title": "SWE"}'}
+
+    @track_node("resume", "gap_analysis", TrackBehavior.VERSION_ON_RERUN)
+    async def dict_node(state):
+        return {**state, "gap_analysis": {"items": [1, 2]}}
+
+    @track_node("master", "resolve_default_resume", TrackBehavior.SINGLE_SHOT)
+    async def unrelated_keys(state):
+        return {"default_resume_id": 7, "default_resume_text": "hi"}
+
+    async with aiosqlite.connect(migrated_db) as conn:
+        await conn.execute("INSERT INTO ai_runs (id, job_id, resume_id) VALUES (100, NULL, NULL)")
+        await conn.commit()
+
+    base = {"workflow_run_id": "run-result", "job_id": None, "run_id": 100}
+    await string_node(base)
+    await dict_node(base)
+    await unrelated_keys({"workflow_run_id": "run-result-2", "job_id": None})
+
+    async with aiosqlite.connect(migrated_db) as conn:
+        conn.row_factory = aiosqlite.Row
+        rows = {
+            r["node_name"]: r
+            for r in await (
+                await conn.execute(
+                    "SELECT node_name, result FROM pipeline_events "
+                    "WHERE workflow_run_id IN (?, ?)",
+                    ("run-result", "run-result-2"),
+                )
+            ).fetchall()
+        }
+
+    assert rows["jd_analysis"]["result"] == '{"title": "SWE"}'
+    assert rows["gap_analysis"]["result"] == '{"items": [1, 2]}'
+    # When the return dict has no key matching node_name, result stays NULL.
+    assert rows["resolve_default_resume"]["result"] is None
+
+
+@pytest.mark.asyncio
 async def test_track_node_retry_in_place_bumps_attempt_on_reentry(migrated_db):
     from src.agents.pipeline_tracking import track_node, TrackBehavior
     import aiosqlite

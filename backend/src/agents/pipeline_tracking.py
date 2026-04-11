@@ -12,6 +12,7 @@ replace this bus with an external broker (e.g. Redis pub/sub).
 """
 import asyncio
 import inspect
+import json
 import logging
 import time
 import traceback as tb_module
@@ -309,11 +310,22 @@ def track_node(graph: str, node_name: str, behavior: TrackBehavior = TrackBehavi
                 return result
 
             new_job_id = None
+            result_payload: str | None = None
             if isinstance(result, dict):
                 new_job_id = result.get("job_id") if result.get("job_id") else None
+                raw_payload = result.get(node_name)
+                if raw_payload is not None:
+                    if isinstance(raw_payload, str):
+                        result_payload = raw_payload
+                    else:
+                        try:
+                            result_payload = json.dumps(raw_payload, default=str)
+                        except (TypeError, ValueError):
+                            result_payload = None
             await _mark_completed(
                 row_id, workflow_run_id, duration_ms,
                 backfill_job_id=new_job_id if node_name == "insert_job" else None,
+                result_payload=result_payload,
             )
             await bus.publish(PipelineEvent(
                 job_id=new_job_id or state.get("job_id"),
@@ -399,6 +411,7 @@ async def _pre_hook(
 async def _mark_completed(
     row_id: int, workflow_run_id: str, duration_ms: int,
     backfill_job_id: int | None = None,
+    result_payload: str | None = None,
 ) -> None:
     async with get_connection() as conn:
         if backfill_job_id is not None:
@@ -407,12 +420,20 @@ async def _mark_completed(
                 "WHERE workflow_run_id=? AND job_id IS NULL",
                 (backfill_job_id, workflow_run_id),
             )
-        await conn.execute(
-            "UPDATE pipeline_events SET status='completed', "
-            "completed_at=datetime('now'), duration_ms=? "
-            "WHERE id=?",
-            (duration_ms, row_id),
-        )
+        if result_payload is not None:
+            await conn.execute(
+                "UPDATE pipeline_events SET status='completed', "
+                "completed_at=datetime('now'), duration_ms=?, result=? "
+                "WHERE id=?",
+                (duration_ms, result_payload, row_id),
+            )
+        else:
+            await conn.execute(
+                "UPDATE pipeline_events SET status='completed', "
+                "completed_at=datetime('now'), duration_ms=? "
+                "WHERE id=?",
+                (duration_ms, row_id),
+            )
         await conn.commit()
 
 
