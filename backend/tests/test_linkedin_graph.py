@@ -489,3 +489,66 @@ class TestParallelExecutionTiming:
         elapsed = time.monotonic() - start
 
         assert elapsed < 0.7, f"parallel fan-out took {elapsed:.2f}s, expected <0.7s"
+
+
+class TestSaveResultsJoin:
+    @pytest.mark.asyncio
+    async def test_save_results_fires_once_with_both_branches(self, monkeypatch):
+        """save_results is deferred so both branches converge before it runs.
+
+        Without defer=True, compile_summary and generate_notes land in
+        different supersteps and save_results fires twice — double-writing
+        contacts. This test pins that behavior.
+        """
+        from src.agents import linkedin_graph
+
+        counts: dict[str, int] = {}
+
+        def _recorder(name: str):
+            async def _node(state):
+                counts[name] = counts.get(name, 0) + 1
+                return {}
+            return _node
+
+        for real_name in (
+            "load_job_node", "precondition_check_node", "analyze_jd_node",
+            "load_brave_key_node", "company_branch_entry_node",
+            "brave_domain_search_node", "browser_domain_search_node",
+            "enrich_apollo_node", "compile_summary_node",
+            "launch_browser_node", "close_browser_node",
+            "review_leadership_brave_node", "review_leadership_playwright_node",
+            "merge_dedup_node", "score_relevance_node", "filter_rank_node",
+            "generate_notes_node", "save_results_node",
+        ):
+            monkeypatch.setattr(
+                linkedin_graph, real_name,
+                _recorder(real_name.removesuffix("_node")),
+            )
+
+        async def _build_queries(state):
+            return {
+                "queries": [
+                    {"query": f"q{t}", "tag": t} for t in
+                    ("recruiter", "ta", "hiring_mgr", "hr", "leadership")
+                ],
+            }
+
+        monkeypatch.setattr(linkedin_graph, "build_queries_node", _build_queries)
+        monkeypatch.setattr(
+            linkedin_graph, "make_brave_search_node",
+            lambda tag: _recorder(f"brave_{tag}"),
+        )
+        monkeypatch.setattr(
+            linkedin_graph, "make_browser_search_node",
+            lambda tag: _recorder(f"browser_{tag}"),
+        )
+
+        graph = linkedin_graph.build_linkedin_graph().compile()
+        await graph.ainvoke(_minimal_state(brave_key="k"))
+
+        assert counts.get("save_results", 0) == 1, (
+            f"save_results fired {counts.get('save_results', 0)} times, expected 1. "
+            f"Full counts: {counts}"
+        )
+        assert counts.get("compile_summary", 0) == 1
+        assert counts.get("generate_notes", 0) == 1

@@ -441,7 +441,11 @@ def build_linkedin_graph() -> StateGraph:
     graph.add_node("score_relevance", score_relevance_node)
     graph.add_node("filter_rank", filter_rank_node)
     graph.add_node("generate_notes", generate_notes_node)
-    graph.add_node("save_results", save_results_node)
+    # defer=True so save_results waits for both branches (company +
+    # connection) to converge before running. Without this, compile_summary
+    # and generate_notes land in different supersteps and save_results fires
+    # twice — double-writing contacts and re-flipping the search status.
+    graph.add_node("save_results", save_results_node, defer=True)
 
     # Entry + preamble
     graph.set_entry_point("load_job")
