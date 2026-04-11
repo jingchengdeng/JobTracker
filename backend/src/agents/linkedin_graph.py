@@ -11,6 +11,7 @@ import logging
 from typing import Annotated, Any, Literal, TypedDict
 
 from langgraph.graph import StateGraph, END
+from playwright.async_api import async_playwright
 
 from src.agents.linkedin_db import (
     save_company_data, save_contacts, update_search_status,
@@ -169,7 +170,6 @@ async def run_brave_searches_node(state: LinkedinState) -> dict:
 @track_node("linkedin", "run_browser_searches", TrackBehavior.SINGLE_SHOT)
 async def run_browser_searches_node(state: LinkedinState) -> dict:
     """Playwright path. Opens browser once, closes in finally."""
-    from playwright.async_api import async_playwright
     from src.agents.linkedin_search import launch_stealth_browser, run_google_search
 
     results: dict[str, list[dict]] = {}
@@ -311,6 +311,67 @@ def make_browser_search_node(tag: str):
 
     node.__name__ = f"browser_{tag}_node"
     return node
+
+
+@track_node("linkedin", "launch_browser", TrackBehavior.SINGLE_SHOT)
+async def launch_browser_node(state: LinkedinState) -> dict:
+    """Start Playwright and launch Chromium exactly once per pipeline run.
+
+    Both entry points into the Playwright lane (company-branch domain search
+    and connection-branch 5-way fan-out) route through this node. The
+    idempotent guard is defence-in-depth in case the two branches land in
+    different supersteps.
+    """
+    if state.get("browser") is not None:
+        return {}
+    pw = await async_playwright().start()
+    browser, display = await launch_stealth_browser(pw, headless=False)
+    return {"browser": browser, "_display": display, "_playwright": pw}
+
+
+@track_node("linkedin", "close_browser", TrackBehavior.SINGLE_SHOT)
+async def close_browser_node(state: LinkedinState) -> dict:
+    """Tear down Chromium, the virtual display, and the Playwright driver.
+
+    Tolerant of missing handles so the pipeline keeps running even if launch
+    never succeeded.
+    """
+    browser = state.get("browser")
+    if browser is not None:
+        try:
+            await browser.close()
+        except Exception:
+            logger.exception("close_browser: browser.close() failed")
+    display = state.get("_display")
+    if display is not None:
+        try:
+            display.stop()
+        except Exception:
+            logger.exception("close_browser: display.stop() failed")
+    pw = state.get("_playwright")
+    if pw is not None:
+        try:
+            await pw.stop()
+        except Exception:
+            logger.exception("close_browser: playwright.stop() failed")
+    return {"browser": None, "_display": None, "_playwright": None}
+
+
+@track_node("linkedin", "browser_domain_search", TrackBehavior.SINGLE_SHOT)
+async def browser_domain_search_node(state: LinkedinState) -> dict:
+    """Look up a company domain via the shared Playwright browser."""
+    if state.get("domain"):
+        return {}
+    browser = state.get("browser")
+    if browser is None:
+        return {}
+    async with _playwright_semaphore:
+        try:
+            domain = await search_domain_google(browser, state["job"]["company"])
+        except Exception:
+            logger.exception("browser_domain_search failed")
+            domain = None
+    return {"domain": domain} if domain else {}
 
 
 async def _analyze_jd_gate(state: LinkedinState) -> str:
