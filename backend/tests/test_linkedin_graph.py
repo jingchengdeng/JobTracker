@@ -552,3 +552,69 @@ class TestSaveResultsJoin:
         )
         assert counts.get("compile_summary", 0) == 1
         assert counts.get("generate_notes", 0) == 1
+
+
+class TestSharedBrowserLaunchedOnce:
+    @pytest.mark.asyncio
+    async def test_playwright_lane_launches_browser_exactly_once(
+        self, monkeypatch, migrated_db
+    ):
+        """Run the playwright lane (no brave_key) with a counter on
+        launch_stealth_browser. Assert it runs once even though both the
+        5-way search fan-out and browser_domain_search need the browser."""
+        import aiosqlite
+        from src.agents import linkedin_graph
+
+        async with aiosqlite.connect(migrated_db) as conn:
+            await conn.execute("INSERT INTO jobs (id) VALUES (999)")
+            await conn.commit()
+
+        launch_count = 0
+        fake_browser = MagicMock()
+        fake_browser.close = AsyncMock()
+        fake_pw = MagicMock()
+        fake_pw.start = AsyncMock(return_value=fake_pw)
+        fake_pw.stop = AsyncMock()
+
+        async def _launch(pw, headless=True):
+            nonlocal launch_count
+            launch_count += 1
+            return fake_browser, None
+
+        monkeypatch.setattr(linkedin_graph, "launch_stealth_browser", _launch)
+        monkeypatch.setattr(linkedin_graph, "async_playwright", lambda: fake_pw)
+
+        async def _noop(state):
+            return {}
+
+        async def _build_queries(state):
+            return {
+                "queries": [
+                    {"query": f"q{t}", "tag": t} for t in
+                    ("recruiter", "ta", "hiring_mgr", "hr", "leadership")
+                ],
+            }
+
+        for real_name in (
+            "load_job_node", "precondition_check_node", "analyze_jd_node",
+            "load_brave_key_node", "company_branch_entry_node",
+            "brave_domain_search_node", "browser_domain_search_node",
+            "enrich_apollo_node", "compile_summary_node",
+            "review_leadership_brave_node", "review_leadership_playwright_node",
+            "merge_dedup_node", "score_relevance_node", "filter_rank_node",
+            "generate_notes_node", "save_results_node",
+        ):
+            monkeypatch.setattr(linkedin_graph, real_name, _noop)
+        monkeypatch.setattr(linkedin_graph, "build_queries_node", _build_queries)
+        monkeypatch.setattr(
+            linkedin_graph, "make_browser_search_node",
+            lambda tag: _noop,
+        )
+        monkeypatch.setattr(
+            linkedin_graph, "make_brave_search_node",
+            lambda tag: _noop,
+        )
+
+        graph = linkedin_graph.build_linkedin_graph().compile()
+        await graph.ainvoke(_minimal_state())  # no brave_key → playwright lane
+        assert launch_count == 1
