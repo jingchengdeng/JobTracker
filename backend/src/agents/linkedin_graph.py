@@ -125,7 +125,7 @@ async def analyze_jd_node(state: LinkedinState) -> dict:
 @track_node("linkedin", "extract_domain_from_jd", TrackBehavior.SINGLE_SHOT)
 async def extract_domain_node(state: LinkedinState) -> dict:
     # Transitional no-op. analyze_jd_node now writes state["domain"] directly;
-    # Task 6 deletes this node entirely.
+    # Task 8 removes this node along with the rest of the graph rewiring.
     return {}
 
 
