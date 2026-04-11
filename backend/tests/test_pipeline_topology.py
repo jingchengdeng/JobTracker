@@ -46,7 +46,37 @@ def test_topology_endpoint_shape():
         "rewrite",
     }
 
-    assert len(_ids_for("linkedin")) == 17
+    assert _ids_for("linkedin") == {
+        "load_job",
+        "precondition_check",
+        "analyze_jd",
+        "load_brave_key",
+        "_company_branch_entry",
+        "brave_domain_search",
+        "browser_domain_search",
+        "enrich_company_apollo",
+        "compile_summary",
+        "build_queries",
+        "launch_browser",
+        "brave_recruiter",
+        "brave_ta",
+        "brave_hiring_mgr",
+        "brave_hr",
+        "brave_leadership",
+        "browser_recruiter",
+        "browser_ta",
+        "browser_hiring_mgr",
+        "browser_hr",
+        "browser_leadership",
+        "review_leadership_brave",
+        "review_leadership_playwright",
+        "close_browser",
+        "merge_dedup",
+        "score_relevance",
+        "filter_rank",
+        "generate_notes",
+        "save_results",
+    }
 
     assert _TOPOLOGY["connectors"] == [
         {"from": "master:resume_branch", "to": "resume:jd_analysis"},
