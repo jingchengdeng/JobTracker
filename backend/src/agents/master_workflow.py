@@ -149,7 +149,7 @@ def build_master_graph() -> StateGraph:
     graph.add_node("extract_fields", extract_fields)
     graph.add_node("validate_fields", validate_fields)
     graph.add_node("insert_job", insert_job)
-    graph.add_node("fail", fail_node)
+    graph.add_node("fail_node", fail_node)
 
     # Post-insert nodes
     graph.add_node("resolve_default_resume", resolve_default_resume)
@@ -165,7 +165,7 @@ def build_master_graph() -> StateGraph:
         {
             "insert_job": "insert_job",
             "extract_fields": "extract_fields",
-            "fail": "fail",
+            "fail": "fail_node",
         },
     )
     graph.add_conditional_edges(
@@ -180,7 +180,7 @@ def build_master_graph() -> StateGraph:
         "resolve_default_resume",
         fan_out,
     )
-    graph.add_edge("fail", END)
+    graph.add_edge("fail_node", END)
     graph.add_edge("resume_branch", END)
     graph.add_edge("linkedin_branch", END)
 
