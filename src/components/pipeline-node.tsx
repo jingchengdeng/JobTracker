@@ -78,6 +78,18 @@ function PipelineNodeInner(props: PipelineNodeProps) {
         position={Position.Top}
         className="!h-1.5 !w-1.5 !border-0 !bg-white/30"
       />
+      <Handle
+        id="target-left"
+        type="target"
+        position={Position.Left}
+        className="!h-1.5 !w-1.5 !border-0 !bg-white/30"
+      />
+      <Handle
+        id="target-right"
+        type="target"
+        position={Position.Right}
+        className="!h-1.5 !w-1.5 !border-0 !bg-white/30"
+      />
       <div
         className={cn(
           "flex items-center justify-between px-2 py-0.5 text-[9px] uppercase tracking-wide font-semibold",
@@ -105,6 +117,18 @@ function PipelineNodeInner(props: PipelineNodeProps) {
       <Handle
         type="source"
         position={Position.Bottom}
+        className="!h-1.5 !w-1.5 !border-0 !bg-white/30"
+      />
+      <Handle
+        id="source-left"
+        type="source"
+        position={Position.Left}
+        className="!h-1.5 !w-1.5 !border-0 !bg-white/30"
+      />
+      <Handle
+        id="source-right"
+        type="source"
+        position={Position.Right}
         className="!h-1.5 !w-1.5 !border-0 !bg-white/30"
       />
     </div>

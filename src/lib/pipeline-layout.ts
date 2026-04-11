@@ -214,14 +214,39 @@ function layoutSingle(graph: TopologyGraph, opts: LayoutOpts = {}): LaidOutGraph
     };
   });
 
-  const edges: Edge[] = graph.edges.map((e) => ({
-    id: `${graph.id}:${e.source}->${e.target}`,
-    source: `${graph.id}:${e.source}`,
-    target: `${graph.id}:${e.target}`,
-    type: "smoothstep",
-    animated: false,
-    style: { strokeDasharray: e.conditional ? "4 4" : undefined },
-  }));
+  // Shortcut edges skip over a node on the main path. If we route them from
+  // the bottom of the source to the top of the target, the smoothstep path
+  // passes straight through the intermediate node (e.g. run_brave_searches →
+  // merge_dedup clipping review_leadership). Bow them outward instead: pick
+  // the side (left or right) that's away from the main column so the edge
+  // exits sideways and re-enters from the same side of the target.
+  const laidCenterX = new Map<string, number>();
+  for (const n of nodes) {
+    laidCenterX.set(n.id, n.position.x + NODE_WIDTH / 2);
+  }
+
+  const edges: Edge[] = graph.edges.map((e) => {
+    const isShortcut = shortcuts.has(`${e.source}->${e.target}`);
+    const edge: Edge = {
+      id: `${graph.id}:${e.source}->${e.target}`,
+      source: `${graph.id}:${e.source}`,
+      target: `${graph.id}:${e.target}`,
+      type: "smoothstep",
+      animated: false,
+      style: { strokeDasharray: e.conditional ? "4 4" : undefined },
+    };
+    if (isShortcut) {
+      const sx = laidCenterX.get(`${graph.id}:${e.source}`) ?? 0;
+      const tx = laidCenterX.get(`${graph.id}:${e.target}`) ?? 0;
+      // Route LEFT if source sits left of target, RIGHT otherwise. Both
+      // endpoints use the same side so the edge curves around the intermediate
+      // node rather than passing through it.
+      const side = sx <= tx ? "left" : "right";
+      edge.sourceHandle = `source-${side}`;
+      edge.targetHandle = `target-${side}`;
+    }
+    return edge;
+  });
 
   return { id: graph.id, nodes, edges, minX, minY, maxX, maxY };
 }
