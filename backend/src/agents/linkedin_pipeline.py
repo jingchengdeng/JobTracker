@@ -101,7 +101,13 @@ async def truncate_note(note: str) -> str:
 # --- LLM nodes ---
 
 async def run_analyze_jd(job: dict) -> dict:
-    """Analyze the JD to extract role info. Returns dict matching JdAnalysis fields."""
+    """Analyze the JD. Returns dict matching JdAnalysis fields, including optional domain.
+
+    The LLM is asked to extract both structured role info and the company domain in
+    a single structured call. If the description is blank we short-circuit the domain
+    to None regardless of what the LLM returned, matching the old extract_domain_node
+    behaviour.
+    """
     llm = await get_linkedin_model()
     structured = llm.with_structured_output(JdAnalysis, method="function_calling")
     description = job.get("description") or ""
@@ -110,38 +116,16 @@ async def run_analyze_jd(job: dict) -> dict:
         f"Analyze this job posting and extract structured information.\n\n"
         f"Job title: {title}\n\n"
         f"Job description:\n{description[:3000]}\n\n"
-        "Extract the role title, department domain, seniority level, "
-        "leadership titles one level above this role, and relevant department keywords."
+        "Extract: role title, department domain, seniority level, leadership titles "
+        "one level above this role, relevant department keywords, and the company "
+        "website domain. For the domain, return null unless the description contains "
+        "an explicit URL, email address, or website reference — do not guess."
     )
     result = await structured.ainvoke([HumanMessage(content=prompt)])
-    return result.model_dump()
-
-
-async def run_extract_domain(job: dict) -> str | None:
-    """Try to extract a company domain from the JD text."""
-    description = job.get("description") or ""
+    payload = result.model_dump()
     if not description.strip():
-        return None
-    llm = await get_linkedin_model()
-    prompt = (
-        "Extract the company's website domain from this job description. "
-        "Look for URLs, email addresses, or explicit mentions of the company website. "
-        "Return ONLY the domain (e.g., 'stripe.com') or the word 'none' if no domain is found. "
-        "Do not guess — only return a domain if you find explicit evidence.\n\n"
-        f"Job description:\n{description[:3000]}"
-    )
-    response = await llm.ainvoke([HumanMessage(content=prompt)])
-    raw = response.content
-    if isinstance(raw, list):
-        raw = "".join(block.get("text", "") if isinstance(block, dict) else str(block) for block in raw)
-    text = raw.strip().lower()
-    if text == "none" or len(text) > 100 or " " in text:
-        return None
-    # Clean up common prefixes
-    for prefix in ["http://", "https://", "www."]:
-        if text.startswith(prefix):
-            text = text[len(prefix):]
-    return text.rstrip("/") if "." in text else None
+        payload["domain"] = None
+    return payload
 
 
 async def run_score_relevance(people: list[dict], job: dict, analysis: dict | None) -> list[dict]:

@@ -22,7 +22,6 @@ from src.agents.linkedin_pipeline import (
     filter_and_rank,
     truncate_note,
     run_analyze_jd,
-    run_extract_domain,
     run_score_relevance,
     run_generate_notes,
     run_compile_summary,
@@ -85,10 +84,9 @@ async def analyze_jd_node(state: LinkedinState) -> dict:
 
 @track_node("linkedin", "extract_domain_from_jd", TrackBehavior.SINGLE_SHOT)
 async def extract_domain_node(state: LinkedinState) -> dict:
-    if not state["job"].get("description"):
-        return {"domain": None}
-    domain = await run_extract_domain(state["job"])
-    return {"domain": domain}
+    # Transitional stub — domain is now extracted inside analyze_jd_node.
+    # Task 6 will replace this node entirely.
+    return {"domain": None}
 
 
 @track_node("linkedin", "load_brave_key", TrackBehavior.SINGLE_SHOT)

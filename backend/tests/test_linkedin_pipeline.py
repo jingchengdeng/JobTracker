@@ -159,3 +159,40 @@ class TestRunLinkedinPipelineIntegration:
         call_args = mock_graph.ainvoke.call_args[0][0]
         assert call_args["workflow_run_id"] is not None
         assert len(call_args["workflow_run_id"]) == 36  # UUID format
+
+
+class TestRunAnalyzeJdWithDomain:
+    @pytest.mark.asyncio
+    async def test_returns_domain_when_llm_finds_one(self):
+        from src.agents import linkedin_pipeline
+        from src.agents.linkedin_schemas import JdAnalysis
+
+        fake = JdAnalysis(
+            role_title="SWE", role_domain="engineering", seniority="senior",
+            leadership_titles=["Engineering Manager"], department_keywords=["backend"],
+            domain="stripe.com",
+        )
+        mock_llm = MagicMock()
+        mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(return_value=fake)
+
+        with patch.object(linkedin_pipeline, "get_linkedin_model", AsyncMock(return_value=mock_llm)):
+            result = await linkedin_pipeline.run_analyze_jd(
+                {"title": "SWE", "description": "Visit stripe.com/jobs"}
+            )
+        assert result["domain"] == "stripe.com"
+
+    @pytest.mark.asyncio
+    async def test_nullifies_domain_when_description_empty(self):
+        from src.agents import linkedin_pipeline
+        from src.agents.linkedin_schemas import JdAnalysis
+
+        fake = JdAnalysis(
+            role_title="SWE", role_domain="engineering", seniority="senior",
+            leadership_titles=[], department_keywords=[], domain="made-up.com",
+        )
+        mock_llm = MagicMock()
+        mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(return_value=fake)
+
+        with patch.object(linkedin_pipeline, "get_linkedin_model", AsyncMock(return_value=mock_llm)):
+            result = await linkedin_pipeline.run_analyze_jd({"title": "SWE", "description": ""})
+        assert result["domain"] is None
