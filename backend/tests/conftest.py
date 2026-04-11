@@ -11,6 +11,19 @@ def _disable_langsmith(monkeypatch):
     monkeypatch.setenv("LANGCHAIN_TRACING_V2", "false")
 
 
+@pytest.fixture(autouse=True)
+def _reset_brave_client():
+    """Reset the shared Brave httpx client before each test.
+
+    Ensures tests that patch httpx.AsyncClient always get a fresh client
+    rather than the cached singleton from a previous test.
+    """
+    import src.agents.linkedin_search as ls
+    ls._brave_client_instance = None
+    yield
+    ls._brave_client_instance = None
+
+
 @pytest.fixture
 async def migrated_db(monkeypatch):
     """Fresh SQLite file with pipeline_events + minimal FK targets."""
