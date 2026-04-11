@@ -8,7 +8,7 @@ change to the underlying logic.
 import asyncio
 import json
 import logging
-from typing import Any, Literal, TypedDict
+from typing import Annotated, Any, Literal, TypedDict
 
 from langgraph.graph import StateGraph, END
 
@@ -39,6 +39,17 @@ from src.db import get_connection
 logger = logging.getLogger(__name__)
 
 
+def _merge_results(a: dict | None, b: dict | None) -> dict:
+    """Reducer for parallel writes to ``search_results``.
+
+    Each search node returns a single-key dict like ``{"recruiter": [...]}``.
+    LangGraph calls this reducer with the accumulated dict and each new update,
+    merging them key-wise with later-wins semantics on collision (used by the
+    two review_leadership nodes to overwrite the leadership slot).
+    """
+    return {**(a or {}), **(b or {})}
+
+
 class LinkedinState(TypedDict, total=False):
     search_id: int
     job_id: int
@@ -50,7 +61,10 @@ class LinkedinState(TypedDict, total=False):
     company_data: dict | None
     brave_key: str | None
     queries: list[dict]
-    search_results: dict[str, list[dict]]
+    search_results: Annotated[dict[str, list[dict]], _merge_results]
+    browser: Any
+    _display: Any
+    _playwright: Any
     merged: list[dict]
     ranked: list[dict]
     summary: str | None
