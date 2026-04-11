@@ -127,6 +127,49 @@ type LayoutOpts = {
   ranksep?: number;
 };
 
+/**
+ * A conditional edge is a "shortcut" if there's already another path from its
+ * source to its target through other edges. In that case the edge's presence
+ * in the layout creates a dagre type-1 conflict that forces the real nodes
+ * on the longer (main) path sideways out of alignment. We detect and exclude
+ * these edges from the dagre layout pass — they're still emitted as visual
+ * edges in the ReactFlow output, just without influencing node positions.
+ *
+ * Only conditional edges are considered; non-conditional edges always
+ * participate in layout so the trunk stays connected.
+ */
+function findShortcutEdges(graph: TopologyGraph): Set<string> {
+  const adjacency = new Map<string, { target: string; conditional: boolean }[]>();
+  for (const e of graph.edges) {
+    if (!adjacency.has(e.source)) adjacency.set(e.source, []);
+    adjacency.get(e.source)!.push({ target: e.target, conditional: e.conditional });
+  }
+
+  const shortcuts = new Set<string>();
+  for (const edge of graph.edges) {
+    if (!edge.conditional) continue;
+    const visited = new Set<string>([edge.source]);
+    const stack: string[] = [];
+    for (const next of adjacency.get(edge.source) ?? []) {
+      if (next.target === edge.target) continue; // skip the edge under test
+      stack.push(next.target);
+    }
+    let reached = false;
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (n === edge.target) {
+        reached = true;
+        break;
+      }
+      if (visited.has(n)) continue;
+      visited.add(n);
+      for (const next of adjacency.get(n) ?? []) stack.push(next.target);
+    }
+    if (reached) shortcuts.add(`${edge.source}->${edge.target}`);
+  }
+  return shortcuts;
+}
+
 function layoutSingle(graph: TopologyGraph, opts: LayoutOpts = {}): LaidOutGraph {
   const g = new dagre.graphlib.Graph();
   g.setGraph({
@@ -141,8 +184,11 @@ function layoutSingle(graph: TopologyGraph, opts: LayoutOpts = {}): LaidOutGraph
   for (const n of graph.nodes) {
     g.setNode(n.id, { width: NODE_WIDTH, height: NODE_HEIGHT });
   }
+
+  const shortcuts = findShortcutEdges(graph);
   for (const e of graph.edges) {
-    g.setEdge(e.source, e.target);
+    if (shortcuts.has(`${e.source}->${e.target}`)) continue;
+    g.setEdge(e.source, e.target, { weight: e.conditional ? 1 : 10 });
   }
   dagre.layout(g);
 
