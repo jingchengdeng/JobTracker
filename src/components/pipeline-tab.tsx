@@ -2,7 +2,9 @@
 
 import { Component, useEffect, useRef, useState, type ReactNode } from "react";
 import type { Job } from "@/lib/types";
-import { PipelineDiagram, type NodeState, type NodeStateMap } from "./pipeline-diagram";
+import { PipelineDiagram } from "./pipeline-diagram";
+import { useTopology } from "@/lib/pipeline-topology-hook";
+import type { NodeState, NodeStateMap } from "@/lib/pipeline-layout";
 
 type SnapshotNode = {
   graph: string;
@@ -26,33 +28,55 @@ type Snapshot = {
 
 type StreamFrame =
   | { type: "snapshot"; active_runs: Snapshot["active_runs"]; nodes: SnapshotNode[] }
-  | { type: "event"; graph: string; workflow_run_id: string; node_name: string; status: NodeState["status"]; attempt: number; version: number; round_number: number; duration_ms: number | null; error: string | null; traceback: string | null; job_id: number | null }
+  | {
+      type: "event";
+      graph: string;
+      workflow_run_id: string;
+      node_name: string;
+      status: NodeState["status"];
+      attempt: number;
+      version: number;
+      round_number: number;
+      duration_ms: number | null;
+      error: string | null;
+      traceback: string | null;
+      job_id: number | null;
+    }
   | { type: "graph_reset"; graph: string; workflow_run_id: string };
 
-function nodeKey(f: { workflow_run_id: string; graph: string; node_name: string; round_number: number; version: number }): string {
+function nodeKey(f: {
+  workflow_run_id: string;
+  graph: string;
+  node_name: string;
+  round_number: number;
+  version: number;
+}): string {
   return `${f.workflow_run_id}:${f.graph}:${f.node_name}:${f.round_number}:${f.version}`;
 }
 
 function snapshotToMap(snap: Snapshot): NodeStateMap {
   const m: NodeStateMap = new Map();
   for (const n of snap.nodes) {
-    const k = nodeKey({
-      workflow_run_id: n.workflow_run_id,
-      graph: n.graph,
-      node_name: n.node_name,
-      round_number: n.round_number,
-      version: n.version,
-    });
-    m.set(k, {
-      status: n.status,
-      attempt: n.attempt,
-      durationMs: n.duration_ms,
-      error: n.error,
-      traceback: n.traceback,
-      startedAt: n.started_at,
-      completedAt: n.completed_at,
-      workflowRunId: n.workflow_run_id,
-    });
+    m.set(
+      nodeKey({
+        workflow_run_id: n.workflow_run_id,
+        graph: n.graph,
+        node_name: n.node_name,
+        round_number: n.round_number,
+        version: n.version,
+      }),
+      {
+        status: n.status,
+        attempt: n.attempt,
+        durationMs: n.duration_ms,
+        error: n.error,
+        traceback: n.traceback,
+        startedAt: n.started_at,
+        completedAt: n.completed_at,
+        workflowRunId: n.workflow_run_id,
+        version: n.version,
+      },
+    );
   }
   return m;
 }
@@ -78,6 +102,7 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 }
 
 export function PipelineTab({ job }: { job: Job }) {
+  const { data: topology, error: topologyError, retry } = useTopology();
   const [states, setStates] = useState<NodeStateMap>(new Map());
   const activeRunsRef = useRef<Snapshot["active_runs"]>({ master: null, resume: null, linkedin: null });
 
@@ -92,7 +117,9 @@ export function PipelineTab({ job }: { job: Job }) {
 
     fetchSnapshot();
     const es = new EventSource(`/api/ai/pipeline/stream?job_id=${job.id}`);
-    es.onopen = () => { fetchSnapshot(); };
+    es.onopen = () => {
+      fetchSnapshot();
+    };
     es.onmessage = (ev) => {
       const frame = JSON.parse(ev.data) as StreamFrame;
       setStates((prev) => {
@@ -102,7 +129,13 @@ export function PipelineTab({ job }: { job: Job }) {
           next.clear();
           for (const n of frame.nodes) {
             next.set(
-              nodeKey({ workflow_run_id: n.workflow_run_id, graph: n.graph, node_name: n.node_name, round_number: n.round_number, version: n.version }),
+              nodeKey({
+                workflow_run_id: n.workflow_run_id,
+                graph: n.graph,
+                node_name: n.node_name,
+                round_number: n.round_number,
+                version: n.version,
+              }),
               {
                 status: n.status,
                 attempt: n.attempt,
@@ -112,6 +145,7 @@ export function PipelineTab({ job }: { job: Job }) {
                 startedAt: n.started_at,
                 completedAt: n.completed_at,
                 workflowRunId: n.workflow_run_id,
+                version: n.version,
               },
             );
           }
@@ -145,18 +179,43 @@ export function PipelineTab({ job }: { job: Job }) {
             startedAt: null,
             completedAt: null,
             workflowRunId: frame.workflow_run_id,
+            version: frame.version,
           },
         );
         return next;
       });
     };
-    return () => { es.close(); };
+    return () => {
+      es.close();
+    };
   }, [job.id]);
+
+  if (topologyError) {
+    return (
+      <div className="flex h-[640px] flex-col items-center justify-center gap-3 rounded-xl border border-white/[0.06] bg-white/[0.02] text-sm text-red-300">
+        <p>Failed to load pipeline topology: {topologyError.message}</p>
+        <button
+          onClick={retry}
+          className="rounded border border-white/[0.08] bg-white/[0.04] px-3 py-1 text-slate-200 hover:bg-white/[0.08]"
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (!topology) {
+    return (
+      <div className="flex h-[640px] items-center justify-center rounded-xl border border-white/[0.06] bg-white/[0.02] text-sm text-slate-400">
+        Loading pipeline topology…
+      </div>
+    );
+  }
 
   return (
     <ErrorBoundary>
-      <div className="rounded-xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-xl">
-        <PipelineDiagram nodeStates={states} />
+      <div className="overflow-hidden rounded-xl border border-white/[0.06] bg-white/[0.02] backdrop-blur-xl">
+        <PipelineDiagram topology={topology} nodeStates={states} />
       </div>
     </ErrorBoundary>
   );
