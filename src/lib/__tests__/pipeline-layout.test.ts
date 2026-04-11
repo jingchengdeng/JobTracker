@@ -92,3 +92,89 @@ describe("reindex + lookupState", () => {
     expect(reindex(map).size).toBe(1);
   });
 });
+
+import { layoutGraphs, type Topology } from "../pipeline-layout";
+
+const TOPOLOGY: Topology = {
+  graphs: [
+    {
+      id: "master",
+      nodes: [
+        { id: "extract_fields", graph: "master", label: "extract_fields" },
+        { id: "resolve_default_resume", graph: "master", label: "resolve_default_resume" },
+        { id: "resume_branch", graph: "master", label: "resume_branch" },
+        { id: "linkedin_branch", graph: "master", label: "linkedin_branch" },
+      ],
+      edges: [
+        { source: "extract_fields", target: "resolve_default_resume", conditional: false },
+        { source: "resolve_default_resume", target: "resume_branch", conditional: true },
+        { source: "resolve_default_resume", target: "linkedin_branch", conditional: true },
+      ],
+    },
+    {
+      id: "resume",
+      nodes: [
+        { id: "jd_analysis", graph: "resume", label: "jd_analysis" },
+        { id: "rag_retrieval", graph: "resume", label: "rag_retrieval" },
+      ],
+      edges: [
+        { source: "jd_analysis", target: "rag_retrieval", conditional: false },
+      ],
+    },
+    {
+      id: "linkedin",
+      nodes: [
+        { id: "load_job", graph: "linkedin", label: "load_job" },
+        { id: "precondition_check", graph: "linkedin", label: "precondition_check" },
+      ],
+      edges: [
+        { source: "load_job", target: "precondition_check", conditional: false },
+      ],
+    },
+  ],
+  connectors: [
+    { from: "master:resume_branch", to: "resume:jd_analysis" },
+    { from: "master:linkedin_branch", to: "linkedin:load_job" },
+  ],
+};
+
+describe("layoutGraphs", () => {
+  it("produces finite x/y for every node", () => {
+    const { nodes } = layoutGraphs(TOPOLOGY);
+    expect(nodes.length).toBe(8);
+    for (const n of nodes) {
+      expect(Number.isFinite(n.position.x)).toBe(true);
+      expect(Number.isFinite(n.position.y)).toBe(true);
+    }
+  });
+
+  it("prefixes ids with the graph id", () => {
+    const { nodes } = layoutGraphs(TOPOLOGY);
+    const ids = new Set(nodes.map((n) => n.id));
+    expect(ids.has("master:extract_fields")).toBe(true);
+    expect(ids.has("resume:jd_analysis")).toBe(true);
+    expect(ids.has("linkedin:load_job")).toBe(true);
+  });
+
+  it("aligns resume root under master:resume_branch within tolerance", () => {
+    const { nodes } = layoutGraphs(TOPOLOGY);
+    const branch = nodes.find((n) => n.id === "master:resume_branch")!;
+    const root = nodes.find((n) => n.id === "resume:jd_analysis")!;
+    expect(Math.abs(branch.position.x - root.position.x)).toBeLessThan(50);
+  });
+
+  it("aligns linkedin root under master:linkedin_branch within tolerance", () => {
+    const { nodes } = layoutGraphs(TOPOLOGY);
+    const branch = nodes.find((n) => n.id === "master:linkedin_branch")!;
+    const root = nodes.find((n) => n.id === "linkedin:load_job")!;
+    expect(Math.abs(branch.position.x - root.position.x)).toBeLessThan(50);
+  });
+
+  it("emits backend edges plus the two cross-graph connectors", () => {
+    const { edges } = layoutGraphs(TOPOLOGY);
+    const ids = new Set(edges.map((e) => e.id));
+    expect(ids.has("connector:master:resume_branch->resume:jd_analysis")).toBe(true);
+    expect(ids.has("connector:master:linkedin_branch->linkedin:load_job")).toBe(true);
+    expect(edges.some((e) => e.source === "master:extract_fields" && e.target === "master:resolve_default_resume")).toBe(true);
+  });
+});
