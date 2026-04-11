@@ -183,3 +183,63 @@ class TestAnalyzeJdNode:
             })
         assert result["analysis"]["role_title"] == "SWE"
         assert result["domain"] == "stripe.com"
+
+
+class TestReviewLeadershipNodes:
+    @pytest.mark.asyncio
+    async def test_returns_empty_when_no_retry_needed(self):
+        from src.agents import linkedin_graph
+        from src.agents.linkedin_schemas import LeadershipReview
+
+        review = LeadershipReview(
+            relevant_count=4, total_count=5, needs_retry=False, refined_query=None,
+        )
+        with patch.object(
+            linkedin_graph, "run_review_leadership", AsyncMock(return_value=review)
+        ):
+            state = {
+                "workflow_run_id": "test-wf", "job_id": 1,
+                "analysis": {"role_domain": "engineering"},
+                "brave_key": "k",
+                "search_results": {"leadership": [{"name": "x", "title": "Eng Mgr"}]},
+                "job": {"company": "Stripe"},
+            }
+            result = await linkedin_graph.review_leadership_brave_node(state)
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_returns_fresh_dict_on_retry(self):
+        from src.agents import linkedin_graph
+        from src.agents.linkedin_schemas import LeadershipReview
+
+        review = LeadershipReview(
+            relevant_count=1, total_count=5, needs_retry=True, refined_query="head of eng",
+        )
+        new_people = [{"name": "y", "title": "VP Eng"}]
+        with patch.object(
+            linkedin_graph, "run_review_leadership", AsyncMock(return_value=review)
+        ), patch.object(
+            linkedin_graph, "brave_search_profiles", AsyncMock(return_value=new_people)
+        ):
+            original_results = {"leadership": [{"name": "x"}]}
+            state = {
+                "workflow_run_id": "test-wf", "job_id": 1,
+                "analysis": {"role_domain": "engineering"},
+                "brave_key": "k",
+                "search_results": original_results,
+                "job": {"company": "Stripe"},
+            }
+            result = await linkedin_graph.review_leadership_brave_node(state)
+        assert result == {"search_results": {"leadership": new_people}}
+        assert original_results == {"leadership": [{"name": "x"}]}
+
+    @pytest.mark.asyncio
+    async def test_playwright_node_shares_implementation(self):
+        from src.agents import linkedin_graph
+        state = {
+            "workflow_run_id": "test-wf", "job_id": 1,
+            "analysis": {"role_domain": "engineering"},
+            "search_results": {"leadership": []},
+            "job": {"company": "Stripe"},
+        }
+        assert await linkedin_graph.review_leadership_playwright_node(state) == {}

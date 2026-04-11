@@ -213,6 +213,42 @@ async def review_leadership_node(state: LinkedinState) -> dict:
     return {"search_results": results}
 
 
+async def _review_leadership_impl(state: LinkedinState) -> dict:
+    """Shared body for the two review_leadership_* nodes.
+
+    Returns a fresh ``{"search_results": {"leadership": [...]}}`` dict when a
+    Brave retry found replacement results, or ``{}`` otherwise. Never mutates
+    the existing search_results dict in state — parallel nodes may hold
+    references to it.
+    """
+    results = state.get("search_results") or {}
+    leadership = results.get("leadership")
+    analysis = state.get("analysis")
+    if not leadership or not analysis:
+        return {}
+    review = await run_review_leadership(leadership, analysis["role_domain"])
+    if review.needs_retry and review.refined_query and state.get("brave_key"):
+        retry_q = f'site:linkedin.com/in "{review.refined_query}" {state["job"]["company"]}'
+        try:
+            retry_results = await brave_search_profiles(retry_q, state["brave_key"])
+        except Exception:
+            logger.exception("review_leadership retry failed")
+            return {}
+        if retry_results:
+            return {"search_results": {"leadership": retry_results}}
+    return {}
+
+
+@track_node("linkedin", "review_leadership_brave", TrackBehavior.SINGLE_SHOT)
+async def review_leadership_brave_node(state: LinkedinState) -> dict:
+    return await _review_leadership_impl(state)
+
+
+@track_node("linkedin", "review_leadership_playwright", TrackBehavior.SINGLE_SHOT)
+async def review_leadership_playwright_node(state: LinkedinState) -> dict:
+    return await _review_leadership_impl(state)
+
+
 @track_node("linkedin", "merge_dedup", TrackBehavior.SINGLE_SHOT)
 async def merge_dedup_node(state: LinkedinState) -> dict:
     merged = await merge_and_deduplicate(state.get("search_results", {}))
@@ -372,6 +408,17 @@ async def browser_domain_search_node(state: LinkedinState) -> dict:
             logger.exception("browser_domain_search failed")
             domain = None
     return {"domain": domain} if domain else {}
+
+
+@track_node("linkedin", "_company_branch_entry", TrackBehavior.SINGLE_SHOT)
+async def company_branch_entry_node(state: LinkedinState) -> dict:
+    """Pass-through to hold the company-branch conditional edge.
+
+    LangGraph requires a node to attach ``add_conditional_edges`` to; this
+    node exists purely so the fork from load_brave_key can route into
+    _company_domain_gate without conflicting with the build_queries fork.
+    """
+    return {}
 
 
 async def _analyze_jd_gate(state: LinkedinState) -> str:
