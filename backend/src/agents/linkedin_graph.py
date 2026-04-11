@@ -79,14 +79,15 @@ async def precondition_check_node(state: LinkedinState) -> dict:
 @track_node("linkedin", "analyze_jd", TrackBehavior.SINGLE_SHOT)
 async def analyze_jd_node(state: LinkedinState) -> dict:
     analysis = await run_analyze_jd(state["job"])
-    return {"analysis": analysis}
+    domain = analysis.pop("domain", None)
+    return {"analysis": analysis, "domain": domain}
 
 
 @track_node("linkedin", "extract_domain_from_jd", TrackBehavior.SINGLE_SHOT)
 async def extract_domain_node(state: LinkedinState) -> dict:
-    # Transitional stub — domain is now extracted inside analyze_jd_node.
-    # Task 6 will replace this node entirely.
-    return {"domain": None}
+    # Transitional no-op. analyze_jd_node now writes state["domain"] directly;
+    # Task 6 deletes this node entirely.
+    return {}
 
 
 @track_node("linkedin", "load_brave_key", TrackBehavior.SINGLE_SHOT)

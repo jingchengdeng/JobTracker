@@ -196,3 +196,29 @@ class TestRunAnalyzeJdWithDomain:
         with patch.object(linkedin_pipeline, "get_linkedin_model", AsyncMock(return_value=mock_llm)):
             result = await linkedin_pipeline.run_analyze_jd({"title": "SWE", "description": ""})
         assert result["domain"] is None
+
+
+class TestAnalyzeJdNodePropagatesDomain:
+    @pytest.mark.asyncio
+    async def test_writes_domain_to_state(self):
+        from src.agents import linkedin_graph
+        from src.agents import linkedin_pipeline
+        from src.agents.linkedin_schemas import JdAnalysis
+
+        fake = JdAnalysis(
+            role_title="SWE", role_domain="engineering", seniority="senior",
+            leadership_titles=[], department_keywords=[], domain="stripe.com",
+        )
+        mock_llm = MagicMock()
+        mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(return_value=fake)
+
+        with patch.object(linkedin_pipeline, "get_linkedin_model", AsyncMock(return_value=mock_llm)):
+            result = await linkedin_graph.analyze_jd_node({
+                "workflow_run_id": "test-wf",
+                "job_id": 1,
+                "job": {"title": "SWE", "description": "Visit stripe.com/jobs"},
+            })
+
+        assert result["domain"] == "stripe.com"
+        assert result["analysis"]["role_title"] == "SWE"
+        assert "domain" not in result["analysis"]  # popped out, not duplicated
