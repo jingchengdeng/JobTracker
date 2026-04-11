@@ -13,6 +13,9 @@ from sse_starlette.sse import EventSourceResponse
 
 from src.agents.pipeline_tracking import bus, PipelineEvent
 from src.db import get_connection
+from src.agents.master_workflow import _compiled_master_graph
+from src.agents.orchestrator import workflow as _resume_compiled_graph
+from src.agents.linkedin_graph import linkedin_graph as _linkedin_compiled_graph
 
 logger = logging.getLogger(__name__)
 
@@ -139,3 +142,57 @@ async def stream(job_id: int, request: Request):
             }
 
     return EventSourceResponse(event_generator())
+
+
+# --- Topology endpoint -----------------------------------------------------
+#
+# Extraction runs ONCE at import time. The handler returns a pre-computed
+# Python dict by reference — no await, no I/O, no lock. This is the hard
+# requirement: the handler must not block the FastAPI event loop.
+
+_INTERNAL_NODES = ("__start__", "__end__")
+
+
+def _extract(compiled_graph, graph_id: str) -> dict:
+    g = compiled_graph.get_graph()
+    nodes = [
+        {"id": n, "graph": graph_id, "label": n}
+        for n in g.nodes
+        if n not in _INTERNAL_NODES
+    ]
+    edges = [
+        {
+            "source": e.source,
+            "target": e.target,
+            "conditional": bool(getattr(e, "conditional", False)),
+        }
+        for e in g.edges
+        if e.source not in _INTERNAL_NODES and e.target not in _INTERNAL_NODES
+    ]
+    return {"id": graph_id, "nodes": nodes, "edges": edges}
+
+
+def _build_topology() -> dict:
+    return {
+        "graphs": [
+            _extract(_compiled_master_graph, "master"),
+            _extract(_resume_compiled_graph, "resume"),
+            _extract(_linkedin_compiled_graph, "linkedin"),
+        ],
+        "connectors": [
+            {"from": "master:resume_branch", "to": "resume:jd_analysis"},
+            {"from": "master:linkedin_branch", "to": "linkedin:load_job"},
+        ],
+    }
+
+
+try:
+    _TOPOLOGY: dict = _build_topology()
+except Exception as exc:  # pragma: no cover (surfaced via error field)
+    logger.exception("pipeline topology build failed at import")
+    _TOPOLOGY = {"graphs": [], "connectors": [], "error": str(exc)}
+
+
+@router.get("/topology")
+async def get_topology() -> dict:
+    return _TOPOLOGY
