@@ -107,8 +107,10 @@ export type Topology = {
 
 const NODE_WIDTH = 180;
 const NODE_HEIGHT = 52;
-const GRAPH_GAP_Y = 40;
-const COLUMN_GAP_X = 120;
+const GRAPH_GAP_Y = 80;
+const COLUMN_GAP_X = 180;
+const DEFAULT_NODESEP = 60;
+const DEFAULT_RANKSEP = 80;
 
 type LaidOutGraph = {
   id: string;
@@ -120,9 +122,20 @@ type LaidOutGraph = {
   maxY: number;
 };
 
-function layoutSingle(graph: TopologyGraph): LaidOutGraph {
+type LayoutOpts = {
+  nodesep?: number;
+  ranksep?: number;
+};
+
+function layoutSingle(graph: TopologyGraph, opts: LayoutOpts = {}): LaidOutGraph {
   const g = new dagre.graphlib.Graph();
-  g.setGraph({ rankdir: "TB", nodesep: 24, ranksep: 32, marginx: 16, marginy: 16 });
+  g.setGraph({
+    rankdir: "TB",
+    nodesep: opts.nodesep ?? DEFAULT_NODESEP,
+    ranksep: opts.ranksep ?? DEFAULT_RANKSEP,
+    marginx: 16,
+    marginy: 16,
+  });
   g.setDefaultEdgeLabel(() => ({}));
 
   for (const n of graph.nodes) {
@@ -182,53 +195,124 @@ function findNode(laid: LaidOutGraph, suffix: string): Node | undefined {
   return laid.nodes.find((n) => n.id === `${laid.id}:${suffix}`);
 }
 
-function stitch(graphs: LaidOutGraph[]): { nodes: Node[]; edges: Edge[] } {
-  const master = graphs.find((g) => g.id === "master");
-  const resume = graphs.find((g) => g.id === "resume");
-  const linkedin = graphs.find((g) => g.id === "linkedin");
+function nodeCenterX(n: Node): number {
+  return n.position.x + NODE_WIDTH / 2;
+}
+
+type RootGeometry = {
+  rootCenterX: number;
+  leftExtent: number; // distance from root center to left edge of subgraph
+  rightExtent: number; // distance from root center to right edge of subgraph
+};
+
+function rootGeometry(sub: LaidOutGraph, rootSuffix: string): RootGeometry | undefined {
+  const root = findNode(sub, rootSuffix);
+  if (!root) return undefined;
+  const rootCenterX = nodeCenterX(root);
+  return {
+    rootCenterX,
+    leftExtent: rootCenterX - sub.minX,
+    rightExtent: sub.maxX - rootCenterX,
+  };
+}
+
+/**
+ * Place master at the top, then place each subgraph directly under its own
+ * fan-out branch node. Master is laid out with a dynamically computed
+ * `nodesep` that guarantees the fan-out siblings are far enough apart for
+ * both subgraphs to sit side-by-side underneath without overlapping — no
+ * matter which sibling dagre picks as the left one.
+ *
+ * Without this dynamic nodesep, master's default dagre spacing puts the
+ * fan-out siblings ~200px apart while the LinkedIn subgraph alone spans
+ * ~500px, forcing the cross-graph connectors into long diagonals that
+ * visually tangle both subpipelines together.
+ */
+function stitch(
+  master: LaidOutGraph | undefined,
+  resume: LaidOutGraph | undefined,
+  linkedin: LaidOutGraph | undefined,
+  topology: Topology,
+): { nodes: Node[]; edges: Edge[]; all: LaidOutGraph[] } {
   if (!master) {
-    return {
-      nodes: graphs.flatMap((g) => g.nodes),
-      edges: graphs.flatMap((g) => g.edges),
-    };
+    const all = [resume, linkedin].filter((g): g is LaidOutGraph => !!g);
+    return { nodes: all.flatMap((g) => g.nodes), edges: all.flatMap((g) => g.edges), all };
+  }
+  if (!resume && !linkedin) {
+    return { nodes: master.nodes, edges: master.edges, all: [master] };
   }
 
-  const subY = master.maxY + GRAPH_GAP_Y;
+  // Compute each subgraph's root geometry relative to its own (un-shifted)
+  // layout. We care about how far the root sits from the subgraph's left
+  // and right edges so we can pick the minimum master fan-out spacing that
+  // keeps them disjoint once each is centered on its branch node.
+  const resumeGeom = resume ? rootGeometry(resume, "jd_analysis") : undefined;
+  const linkedinGeom = linkedin ? rootGeometry(linkedin, "load_job") : undefined;
 
-  let resumeShifted: LaidOutGraph | undefined = resume;
-  if (resume) {
-    const resumeBranch = findNode(master, "resume_branch");
-    const resumeRoot = findNode(resume, "jd_analysis");
-    const dx = resumeBranch && resumeRoot ? resumeBranch.position.x - resumeRoot.position.x : 0;
+  // Required center-to-center distance between master's two branch nodes:
+  //   worstCase = max(
+  //     resume.rightExtent + linkedin.leftExtent + GAP,   // resume on left
+  //     linkedin.rightExtent + resume.leftExtent + GAP,   // linkedin on left
+  //   )
+  // We take the max because dagre may pick either order; both configurations
+  // must fit without overlap.
+  let requiredSpan = 0;
+  if (resumeGeom && linkedinGeom) {
+    const caseA = resumeGeom.rightExtent + linkedinGeom.leftExtent + COLUMN_GAP_X;
+    const caseB = linkedinGeom.rightExtent + resumeGeom.leftExtent + COLUMN_GAP_X;
+    requiredSpan = Math.max(caseA, caseB);
+  }
+
+  // Relayout master with a nodesep that guarantees siblings at the same rank
+  // are at least `requiredSpan` center-to-center apart. Dagre's `nodesep` is
+  // the edge-to-edge minimum, so center-to-center = nodesep + NODE_WIDTH.
+  let masterLaid = master;
+  if (requiredSpan > 0) {
+    const requiredNodesep = Math.max(DEFAULT_NODESEP, requiredSpan - NODE_WIDTH);
+    const masterTopo = topology.graphs.find((g) => g.id === "master");
+    if (masterTopo) {
+      masterLaid = layoutSingle(masterTopo, { nodesep: requiredNodesep });
+    }
+  }
+
+  const subY = masterLaid.maxY + GRAPH_GAP_Y;
+
+  // Place each subgraph so its root node sits directly under the matching
+  // master branch. Order is derived from whatever master gave us — dagre may
+  // have put linkedin_branch on the left or on the right; either works.
+  let resumeShifted: LaidOutGraph | undefined;
+  let linkedinShifted: LaidOutGraph | undefined;
+
+  if (resume && resumeGeom) {
+    const masterResumeBranch = findNode(masterLaid, "resume_branch");
+    const targetX = masterResumeBranch ? nodeCenterX(masterResumeBranch) : resumeGeom.rootCenterX;
+    const dx = targetX - resumeGeom.rootCenterX;
     resumeShifted = shift(resume, dx, subY - resume.minY);
   }
-
-  let linkedinShifted: LaidOutGraph | undefined = linkedin;
-  if (linkedin) {
-    const linkedinBranch = findNode(master, "linkedin_branch");
-    const linkedinRoot = findNode(linkedin, "load_job");
-    const dx = linkedinBranch && linkedinRoot ? linkedinBranch.position.x - linkedinRoot.position.x : 0;
+  if (linkedin && linkedinGeom) {
+    const masterLinkedinBranch = findNode(masterLaid, "linkedin_branch");
+    const targetX = masterLinkedinBranch ? nodeCenterX(masterLinkedinBranch) : linkedinGeom.rootCenterX;
+    const dx = targetX - linkedinGeom.rootCenterX;
     linkedinShifted = shift(linkedin, dx, subY - linkedin.minY);
   }
 
-  if (resumeShifted && linkedinShifted && linkedinShifted.minX < resumeShifted.maxX) {
-    const dx = resumeShifted.maxX + COLUMN_GAP_X - linkedinShifted.minX;
-    linkedinShifted = shift(linkedinShifted, dx, 0);
-  }
-
-  const ordered: LaidOutGraph[] = [master];
+  const ordered: LaidOutGraph[] = [masterLaid];
   if (resumeShifted) ordered.push(resumeShifted);
   if (linkedinShifted) ordered.push(linkedinShifted);
 
   return {
     nodes: ordered.flatMap((g) => g.nodes),
     edges: ordered.flatMap((g) => g.edges),
+    all: ordered,
   };
 }
 
 export function layoutGraphs(topology: Topology): { nodes: Node[]; edges: Edge[] } {
   const laid = topology.graphs.map((g) => layoutSingle(g));
-  const stitched = stitch(laid);
+  const master = laid.find((g) => g.id === "master");
+  const resume = laid.find((g) => g.id === "resume");
+  const linkedin = laid.find((g) => g.id === "linkedin");
+  const stitched = stitch(master, resume, linkedin, topology);
   const connectorEdges: Edge[] = topology.connectors.map((c) => ({
     id: `connector:${c.from}->${c.to}`,
     source: c.from,
@@ -238,4 +322,107 @@ export function layoutGraphs(topology: Topology): { nodes: Node[]; edges: Edge[]
     style: { stroke: "rgba(148,163,184,0.45)" },
   }));
   return { nodes: stitched.nodes, edges: [...stitched.edges, ...connectorEdges] };
+}
+
+// ---------------------------------------------------------------------------
+// Display-status derivation
+// ---------------------------------------------------------------------------
+//
+// The backend only emits pipeline events for nodes that actually run. Nodes on
+// conditional branches that were *not* taken (fail_node when insert_job
+// succeeds, run_browser_searches when run_brave_searches was chosen, etc.)
+// simply never appear in the state map, so they would default to `pending`
+// and look permanently stuck.
+//
+// `deriveDisplayStatus` computes the rendered status for a node given the
+// latest state index and the topology. It returns the real status if present,
+// otherwise "skipped" if either of two rules fires:
+//
+//   Rule B (descendant reached): any forward-reachable node in the same graph
+//     has a non-pending state. If the workflow moved past this node without
+//     touching it, the only explanation is that the scheduler skipped it.
+//
+//   Rule A (conditional sibling chosen): the node has a conditional incoming
+//     edge from a completed source, and some other conditional target of the
+//     same source has a non-pending state. This handles terminal-dead-end
+//     nodes like master:fail_node whose only downstream is END.
+//
+// Otherwise the node stays `pending`.
+
+const STATUS_SETTLED_OR_RUNNING: ReadonlySet<NodeStatus> = new Set([
+  "running",
+  "completed",
+  "failed",
+  "skipped",
+]);
+
+function forwardAdjacency(graph: TopologyGraph): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  for (const e of graph.edges) {
+    if (!out.has(e.source)) out.set(e.source, []);
+    out.get(e.source)!.push(e.target);
+  }
+  return out;
+}
+
+function hasDescendantWithState(
+  start: string,
+  adjacency: Map<string, string[]>,
+  index: LatestByNode,
+  graphId: string,
+): boolean {
+  const visited = new Set<string>();
+  const stack = [...(adjacency.get(start) ?? [])];
+  while (stack.length > 0) {
+    const n = stack.pop()!;
+    if (visited.has(n)) continue;
+    visited.add(n);
+    const st = lookupState(index, graphId, n);
+    if (st && STATUS_SETTLED_OR_RUNNING.has(st.status)) return true;
+    for (const next of adjacency.get(n) ?? []) stack.push(next);
+  }
+  return false;
+}
+
+function hasConditionalSiblingChosen(
+  nodeName: string,
+  graph: TopologyGraph,
+  index: LatestByNode,
+): boolean {
+  for (const incoming of graph.edges) {
+    if (incoming.target !== nodeName || !incoming.conditional) continue;
+    const sourceState = lookupState(index, graph.id, incoming.source);
+    if (!sourceState || sourceState.status !== "completed") continue;
+    for (const other of graph.edges) {
+      if (
+        other.source === incoming.source &&
+        other.target !== nodeName &&
+        other.conditional
+      ) {
+        const otherState = lookupState(index, graph.id, other.target);
+        if (otherState && STATUS_SETTLED_OR_RUNNING.has(otherState.status)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+export function deriveDisplayStatus(
+  topology: Topology,
+  index: LatestByNode,
+  graphId: string,
+  nodeName: string,
+): NodeStatus {
+  const existing = lookupState(index, graphId, nodeName);
+  if (existing) return existing.status;
+
+  const graph = topology.graphs.find((g) => g.id === graphId);
+  if (!graph) return "pending";
+
+  const adjacency = forwardAdjacency(graph);
+  if (hasDescendantWithState(nodeName, adjacency, index, graphId)) return "skipped";
+  if (hasConditionalSiblingChosen(nodeName, graph, index)) return "skipped";
+  return "pending";
 }

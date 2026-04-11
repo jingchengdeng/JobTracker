@@ -12,6 +12,7 @@ import {
   layoutGraphs,
   reindex,
   lookupState,
+  deriveDisplayStatus,
   type NodeState,
   type NodeStateMap,
   type Topology,
@@ -44,7 +45,26 @@ export function PipelineDiagram({ topology, nodeStates }: Props) {
   const nodes: Node[] = useMemo(() => {
     return baseNodes.map((n) => {
       const data = n.data as { graph: string; nodeName: string; label: string };
-      const nodeState = lookupState(index, data.graph, data.nodeName);
+      const rawState = lookupState(index, data.graph, data.nodeName);
+      const displayStatus = deriveDisplayStatus(topology, index, data.graph, data.nodeName);
+      // If the node has no backing state but derivation says "skipped", give
+      // the renderer a minimal synthetic state so PipelineNode picks the
+      // skipped styling instead of falling back to "pending".
+      const nodeState: NodeState | undefined =
+        rawState ??
+        (displayStatus === "skipped"
+          ? {
+              status: "skipped",
+              attempt: 0,
+              durationMs: null,
+              error: null,
+              traceback: null,
+              startedAt: null,
+              completedAt: null,
+              workflowRunId: "",
+              version: 0,
+            }
+          : undefined);
       return {
         ...n,
         data: {
@@ -58,7 +78,7 @@ export function PipelineDiagram({ topology, nodeStates }: Props) {
         },
       };
     });
-  }, [baseNodes, index]);
+  }, [baseNodes, index, topology]);
 
   const animatedEdges = useMemo(() => {
     return edges.map((e) => {
@@ -68,9 +88,19 @@ export function PipelineDiagram({ topology, nodeStates }: Props) {
       const srcState = lookupState(index, src.graph, src.nodeName);
       const tgtState = lookupState(index, tgt.graph, tgt.nodeName);
       const live = srcState?.status === "completed" && tgtState?.status === "running";
-      return { ...e, animated: live };
+      // Fade skipped-branch edges: if either endpoint is derived-skipped, we
+      // dim the edge so the active path pops visually.
+      const srcDisplay = deriveDisplayStatus(topology, index, src.graph, src.nodeName);
+      const tgtDisplay = deriveDisplayStatus(topology, index, tgt.graph, tgt.nodeName);
+      const dimmed = srcDisplay === "skipped" || tgtDisplay === "skipped";
+      const baseStyle = e.style ?? {};
+      return {
+        ...e,
+        animated: live,
+        style: dimmed ? { ...baseStyle, stroke: "rgba(148,163,184,0.2)" } : baseStyle,
+      };
     });
-  }, [edges, index]);
+  }, [edges, index, topology]);
 
   const onNodeClick = useCallback((_: React.MouseEvent, node: Node) => {
     const data = node.data as { graph: string; nodeName: string; state?: NodeState };

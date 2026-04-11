@@ -4,6 +4,7 @@ import {
   isNewer,
   reindex,
   lookupState,
+  deriveDisplayStatus,
   type NodeState,
   type NodeStateMap,
 } from "../pipeline-layout";
@@ -156,18 +157,40 @@ describe("layoutGraphs", () => {
     expect(ids.has("linkedin:load_job")).toBe(true);
   });
 
-  it("aligns resume root under master:resume_branch within tolerance", () => {
+  it("aligns resume root exactly under master:resume_branch", () => {
     const { nodes } = layoutGraphs(TOPOLOGY);
     const branch = nodes.find((n) => n.id === "master:resume_branch")!;
     const root = nodes.find((n) => n.id === "resume:jd_analysis")!;
-    expect(Math.abs(branch.position.x - root.position.x)).toBeLessThan(50);
+    expect(Math.abs(branch.position.x - root.position.x)).toBeLessThanOrEqual(1);
   });
 
-  it("aligns linkedin root under master:linkedin_branch within tolerance", () => {
+  it("aligns linkedin root exactly under master:linkedin_branch", () => {
     const { nodes } = layoutGraphs(TOPOLOGY);
     const branch = nodes.find((n) => n.id === "master:linkedin_branch")!;
     const root = nodes.find((n) => n.id === "linkedin:load_job")!;
-    expect(Math.abs(branch.position.x - root.position.x)).toBeLessThan(50);
+    expect(Math.abs(branch.position.x - root.position.x)).toBeLessThanOrEqual(1);
+  });
+
+  it("keeps resume and linkedin subgraphs horizontally disjoint", () => {
+    const { nodes } = layoutGraphs(TOPOLOGY);
+    const resumeNodes = nodes.filter((n) => n.id.startsWith("resume:"));
+    const linkedinNodes = nodes.filter((n) => n.id.startsWith("linkedin:"));
+    const resumeMaxX = Math.max(...resumeNodes.map((n) => n.position.x));
+    const linkedinMinX = Math.min(...linkedinNodes.map((n) => n.position.x));
+    expect(linkedinMinX).toBeGreaterThan(resumeMaxX);
+  });
+
+  it("places subgraphs below the master graph", () => {
+    const { nodes } = layoutGraphs(TOPOLOGY);
+    const masterMaxY = Math.max(
+      ...nodes.filter((n) => n.id.startsWith("master:")).map((n) => n.position.y),
+    );
+    const subMinY = Math.min(
+      ...nodes
+        .filter((n) => n.id.startsWith("resume:") || n.id.startsWith("linkedin:"))
+        .map((n) => n.position.y),
+    );
+    expect(subMinY).toBeGreaterThan(masterMaxY);
   });
 
   it("emits backend edges plus the two cross-graph connectors", () => {
@@ -176,5 +199,143 @@ describe("layoutGraphs", () => {
     expect(ids.has("connector:master:resume_branch->resume:jd_analysis")).toBe(true);
     expect(ids.has("connector:master:linkedin_branch->linkedin:load_job")).toBe(true);
     expect(edges.some((e) => e.source === "master:extract_fields" && e.target === "master:resolve_default_resume")).toBe(true);
+  });
+});
+
+// --- deriveDisplayStatus ---------------------------------------------------
+
+const MASTER_WITH_FAIL: Topology = {
+  graphs: [
+    {
+      id: "master",
+      nodes: [
+        { id: "extract_fields", graph: "master", label: "extract_fields" },
+        { id: "validate_fields", graph: "master", label: "validate_fields" },
+        { id: "insert_job", graph: "master", label: "insert_job" },
+        { id: "fail_node", graph: "master", label: "fail_node" },
+      ],
+      edges: [
+        { source: "extract_fields", target: "validate_fields", conditional: false },
+        { source: "validate_fields", target: "insert_job", conditional: true },
+        { source: "validate_fields", target: "extract_fields", conditional: true },
+        { source: "validate_fields", target: "fail_node", conditional: true },
+      ],
+    },
+  ],
+  connectors: [],
+};
+
+const LINKEDIN_SUBSET: Topology = {
+  graphs: [
+    {
+      id: "linkedin",
+      nodes: [
+        { id: "load_brave_key", graph: "linkedin", label: "load_brave_key" },
+        { id: "brave_domain_search", graph: "linkedin", label: "brave_domain_search" },
+        { id: "enrich_company_apollo", graph: "linkedin", label: "enrich_company_apollo" },
+        { id: "build_queries", graph: "linkedin", label: "build_queries" },
+        { id: "run_brave_searches", graph: "linkedin", label: "run_brave_searches" },
+        { id: "run_browser_searches", graph: "linkedin", label: "run_browser_searches" },
+        { id: "merge_dedup", graph: "linkedin", label: "merge_dedup" },
+      ],
+      edges: [
+        { source: "load_brave_key", target: "brave_domain_search", conditional: true },
+        { source: "load_brave_key", target: "enrich_company_apollo", conditional: true },
+        { source: "brave_domain_search", target: "enrich_company_apollo", conditional: false },
+        { source: "enrich_company_apollo", target: "build_queries", conditional: false },
+        { source: "build_queries", target: "run_brave_searches", conditional: true },
+        { source: "build_queries", target: "run_browser_searches", conditional: true },
+        { source: "run_brave_searches", target: "merge_dedup", conditional: true },
+        { source: "run_browser_searches", target: "merge_dedup", conditional: true },
+      ],
+    },
+  ],
+  connectors: [],
+};
+
+const RESUME_CHAIN: Topology = {
+  graphs: [
+    {
+      id: "resume",
+      nodes: [
+        { id: "jd_analysis", graph: "resume", label: "jd_analysis" },
+        { id: "rag_retrieval", graph: "resume", label: "rag_retrieval" },
+        { id: "gap_analysis", graph: "resume", label: "gap_analysis" },
+      ],
+      edges: [
+        { source: "jd_analysis", target: "rag_retrieval", conditional: false },
+        { source: "rag_retrieval", target: "gap_analysis", conditional: false },
+      ],
+    },
+  ],
+  connectors: [],
+};
+
+function indexFrom(entries: Array<{ graph: string; node: string; status: NodeState["status"]; attempt?: number }>) {
+  const map: NodeStateMap = new Map();
+  let seq = 1;
+  for (const e of entries) {
+    map.set(`wf-1:${e.graph}:${e.node}:0:1`, state({ status: e.status, attempt: e.attempt ?? 1, startedAt: `2026-04-10T00:00:0${seq++}Z` }));
+  }
+  return reindex(map);
+}
+
+describe("deriveDisplayStatus", () => {
+  it("returns the real status when a node has state", () => {
+    const index = indexFrom([{ graph: "master", node: "insert_job", status: "running" }]);
+    expect(deriveDisplayStatus(MASTER_WITH_FAIL, index, "master", "insert_job")).toBe("running");
+  });
+
+  it("marks fail_node as skipped once insert_job has a state (Rule A)", () => {
+    const index = indexFrom([
+      { graph: "master", node: "extract_fields", status: "completed" },
+      { graph: "master", node: "validate_fields", status: "completed" },
+      { graph: "master", node: "insert_job", status: "running" },
+    ]);
+    expect(deriveDisplayStatus(MASTER_WITH_FAIL, index, "master", "fail_node")).toBe("skipped");
+  });
+
+  it("leaves fail_node pending before validate_fields completes", () => {
+    const index = indexFrom([
+      { graph: "master", node: "extract_fields", status: "completed" },
+      { graph: "master", node: "validate_fields", status: "running" },
+    ]);
+    expect(deriveDisplayStatus(MASTER_WITH_FAIL, index, "master", "fail_node")).toBe("pending");
+  });
+
+  it("marks brave_domain_search skipped when load_brave_key routes to enrich_company_apollo", () => {
+    const index = indexFrom([
+      { graph: "linkedin", node: "load_brave_key", status: "completed" },
+      { graph: "linkedin", node: "enrich_company_apollo", status: "completed" },
+    ]);
+    expect(deriveDisplayStatus(LINKEDIN_SUBSET, index, "linkedin", "brave_domain_search")).toBe("skipped");
+  });
+
+  it("marks run_browser_searches skipped when run_brave_searches was chosen", () => {
+    const index = indexFrom([
+      { graph: "linkedin", node: "build_queries", status: "completed" },
+      { graph: "linkedin", node: "run_brave_searches", status: "completed" },
+      { graph: "linkedin", node: "merge_dedup", status: "running" },
+    ]);
+    expect(deriveDisplayStatus(LINKEDIN_SUBSET, index, "linkedin", "run_browser_searches")).toBe("skipped");
+  });
+
+  it("marks jd_analysis/rag_retrieval skipped when the workflow moved past them via the conditional entry (Rule B)", () => {
+    const index = indexFrom([
+      { graph: "resume", node: "gap_analysis", status: "completed" },
+    ]);
+    expect(deriveDisplayStatus(RESUME_CHAIN, index, "resume", "jd_analysis")).toBe("skipped");
+    expect(deriveDisplayStatus(RESUME_CHAIN, index, "resume", "rag_retrieval")).toBe("skipped");
+  });
+
+  it("leaves a downstream node pending when nothing after it has a state", () => {
+    const index = indexFrom([{ graph: "resume", node: "jd_analysis", status: "running" }]);
+    expect(deriveDisplayStatus(RESUME_CHAIN, index, "resume", "rag_retrieval")).toBe("pending");
+    expect(deriveDisplayStatus(RESUME_CHAIN, index, "resume", "gap_analysis")).toBe("pending");
+  });
+
+  it("returns pending for unknown graphs instead of crashing", () => {
+    const index = indexFrom([]);
+    expect(deriveDisplayStatus(RESUME_CHAIN, index, "does_not_exist", "anything")).toBe("pending");
   });
 });
