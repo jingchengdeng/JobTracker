@@ -51,6 +51,7 @@ async def step_jd_analysis(state: dict) -> dict:
     return {**state, "jd_analysis": result.model_dump_json(), "preferences": preferences}
 
 
+@track_node("resume", "rag_retrieval", TrackBehavior.VERSION_ON_RERUN)
 async def step_rag_retrieval(state: dict) -> dict:
     """Retrieve relevant experience from the resume corpus using RAG."""
     jd_analysis = JdAnalysis.model_validate_json(state["jd_analysis"])
