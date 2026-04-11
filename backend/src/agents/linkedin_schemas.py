@@ -8,6 +8,13 @@ class JdAnalysis(BaseModel):
     seniority: str = Field(description="Level: 'entry', 'mid', 'senior', 'lead', 'manager', 'director', 'vp', 'c_suite'")
     leadership_titles: list[str] = Field(description="One-level-up titles, e.g. ['Engineering Manager', 'Director of Engineering']")
     department_keywords: list[str] = Field(description="Relevant terms for the role domain, e.g. ['backend', 'infrastructure']")
+    domain: str | None = Field(
+        default=None,
+        description=(
+            "Company website domain extracted from the JD text (e.g. 'stripe.com'). "
+            "Return null unless an explicit URL, email, or website reference appears in the description."
+        ),
+    )
 
 
 class PersonRelevanceScore(BaseModel):
