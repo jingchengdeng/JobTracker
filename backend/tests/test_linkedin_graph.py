@@ -243,3 +243,53 @@ class TestReviewLeadershipNodes:
             "job": {"company": "Stripe"},
         }
         assert await linkedin_graph.review_leadership_playwright_node(state) == {}
+
+
+EXPECTED_LINKEDIN_NODES = {
+    "load_job",
+    "precondition_check",
+    "analyze_jd",
+    "load_brave_key",
+    "_company_branch_entry",
+    "brave_domain_search",
+    "browser_domain_search",
+    "enrich_company_apollo",
+    "compile_summary",
+    "build_queries",
+    "launch_browser",
+    "brave_recruiter",
+    "brave_ta",
+    "brave_hiring_mgr",
+    "brave_hr",
+    "brave_leadership",
+    "browser_recruiter",
+    "browser_ta",
+    "browser_hiring_mgr",
+    "browser_hr",
+    "browser_leadership",
+    "review_leadership_brave",
+    "review_leadership_playwright",
+    "close_browser",
+    "merge_dedup",
+    "score_relevance",
+    "filter_rank",
+    "generate_notes",
+    "save_results",
+}
+
+
+class TestGraphStructure:
+    def test_compiled_graph_has_expected_nodes(self):
+        from src.agents.linkedin_graph import linkedin_graph
+        compiled_nodes = set(linkedin_graph.get_graph().nodes.keys())
+        compiled_nodes -= {"__start__", "__end__"}
+        assert compiled_nodes == EXPECTED_LINKEDIN_NODES, (
+            f"missing: {EXPECTED_LINKEDIN_NODES - compiled_nodes}, "
+            f"extra: {compiled_nodes - EXPECTED_LINKEDIN_NODES}"
+        )
+
+    def test_node_count_is_29(self):
+        from src.agents.linkedin_graph import linkedin_graph
+        compiled_nodes = set(linkedin_graph.get_graph().nodes.keys())
+        compiled_nodes -= {"__start__", "__end__"}
+        assert len(compiled_nodes) == 29

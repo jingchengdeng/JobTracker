@@ -32,7 +32,7 @@ from src.agents.linkedin_pipeline import (
 )
 from src.agents.linkedin_search import (
     brave_search_profiles, brave_search_domain, run_google_search,
-    launch_stealth_browser, SEARCH_DELAY_SECONDS,
+    launch_stealth_browser,
 )
 from src.agents.pipeline_tracking import track_node, TrackBehavior
 from src.auth.credentials import load_api_key
@@ -122,12 +122,6 @@ async def analyze_jd_node(state: LinkedinState) -> dict:
     return {"analysis": analysis, "domain": domain}
 
 
-@track_node("linkedin", "extract_domain_from_jd", TrackBehavior.SINGLE_SHOT)
-async def extract_domain_node(state: LinkedinState) -> dict:
-    # Transitional no-op. analyze_jd_node now writes state["domain"] directly;
-    # Task 8 removes this node along with the rest of the graph rewiring.
-    return {}
-
 
 @track_node("linkedin", "load_brave_key", TrackBehavior.SINGLE_SHOT)
 async def load_brave_key_node(state: LinkedinState) -> dict:
@@ -157,60 +151,6 @@ async def build_queries_node(state: LinkedinState) -> dict:
     return {"queries": queries}
 
 
-@track_node("linkedin", "run_brave_searches", TrackBehavior.SINGLE_SHOT)
-async def run_brave_searches_node(state: LinkedinState) -> dict:
-    results: dict[str, list[dict]] = {}
-    for q in state["queries"]:
-        people = await brave_search_profiles(q["query"], state["brave_key"], 15)
-        results[q["tag"]] = people
-        await asyncio.sleep(SEARCH_DELAY_SECONDS)
-    return {"search_results": results}
-
-
-@track_node("linkedin", "run_browser_searches", TrackBehavior.SINGLE_SHOT)
-async def run_browser_searches_node(state: LinkedinState) -> dict:
-    """Playwright path. Opens browser once, closes in finally."""
-    from src.agents.linkedin_search import launch_stealth_browser, run_google_search
-
-    results: dict[str, list[dict]] = {}
-    domain = state.get("domain")
-    company_data = state.get("company_data")
-
-    async with async_playwright() as pw:
-        browser, display = await launch_stealth_browser(pw, headless=False)
-        try:
-            if not domain:
-                domain = await search_domain_google(browser, state["job"]["company"])
-                await asyncio.sleep(SEARCH_DELAY_SECONDS)
-                if domain and not company_data:
-                    company_data = await enrich_company_apollo(domain)
-
-            for q in state["queries"]:
-                people = await run_google_search(browser, q["query"])
-                results[q["tag"]] = people
-                await asyncio.sleep(SEARCH_DELAY_SECONDS)
-        finally:
-            await browser.close()
-            if display:
-                display.stop()
-
-    return {"search_results": results, "domain": domain, "company_data": company_data}
-
-
-@track_node("linkedin", "review_leadership", TrackBehavior.SINGLE_SHOT)
-async def review_leadership_node(state: LinkedinState) -> dict:
-    results = state.get("search_results", {})
-    analysis = state.get("analysis")
-    if "leadership" not in results or not analysis or not results["leadership"]:
-        return {}
-    review = await run_review_leadership(results["leadership"], analysis["role_domain"])
-    if review.needs_retry and review.refined_query and state.get("brave_key"):
-        retry_q = f'site:linkedin.com/in "{review.refined_query}" {state["job"]["company"]}'
-        retry_results = await brave_search_profiles(retry_q, state["brave_key"])
-        if retry_results:
-            results["leadership"] = retry_results
-        await asyncio.sleep(SEARCH_DELAY_SECONDS)
-    return {"search_results": results}
 
 
 async def _review_leadership_impl(state: LinkedinState) -> dict:
@@ -422,110 +362,166 @@ async def company_branch_entry_node(state: LinkedinState) -> dict:
 
 
 async def _analyze_jd_gate(state: LinkedinState) -> str:
-    return "analyze_jd" if state.get("mode") == "full" else "extract_domain_from_jd"
+    """Skip analyze_jd for basic mode (no description, no title)."""
+    return "analyze_jd" if state.get("mode") == "full" else "load_brave_key"
 
 
-async def _brave_domain_search_gate(state: LinkedinState) -> str:
-    if not state.get("domain") and state.get("brave_key"):
+async def _fork_after_brave_key(state: LinkedinState) -> list[str]:
+    """Unconditionally fan out into both the company and connection branches.
+
+    Returning a list from a conditional router tells LangGraph to schedule
+    both targets in the same superstep.
+    """
+    return ["_company_branch_entry", "build_queries"]
+
+
+async def _company_domain_gate(state: LinkedinState) -> str:
+    """Route the company branch: skip domain search if we already have one,
+    otherwise pick the Brave or Playwright lane."""
+    if state.get("domain"):
+        return "enrich_company_apollo"
+    if state.get("brave_key"):
         return "brave_domain_search"
-    return "enrich_apollo_gate"
+    return "launch_browser"
 
 
-async def _enrich_apollo_gate(state: LinkedinState) -> str:
-    return "enrich_company_apollo" if state.get("domain") else "build_queries"
+async def _connection_lane_gate(state: LinkedinState) -> list[str]:
+    """Route the connection branch into all 5 parallel search nodes for the
+    active lane. The inactive lane's 5 nodes simply never run."""
+    if state.get("brave_key"):
+        return [
+            "brave_recruiter", "brave_ta", "brave_hiring_mgr",
+            "brave_hr", "brave_leadership",
+        ]
+    return ["launch_browser"]
 
 
-async def _search_path_gate(state: LinkedinState) -> str:
-    return "run_brave_searches" if state.get("brave_key") else "run_browser_searches"
-
-
-async def _review_leadership_gate(state: LinkedinState) -> str:
-    results = state.get("search_results", {})
+async def _review_brave_gate(state: LinkedinState) -> str:
+    results = state.get("search_results") or {}
     if results.get("leadership") and state.get("analysis"):
-        return "review_leadership"
+        return "review_leadership_brave"
     return "merge_dedup"
+
+
+async def _review_playwright_gate(state: LinkedinState) -> str:
+    results = state.get("search_results") or {}
+    if results.get("leadership") and state.get("analysis"):
+        return "review_leadership_playwright"
+    return "close_browser"
 
 
 def build_linkedin_graph() -> StateGraph:
     graph = StateGraph(LinkedinState)
 
+    # Main spine
     graph.add_node("load_job", load_job_node)
     graph.add_node("precondition_check", precondition_check_node)
     graph.add_node("analyze_jd", analyze_jd_node)
-    graph.add_node("extract_domain_from_jd", extract_domain_node)
     graph.add_node("load_brave_key", load_brave_key_node)
+
+    # Company branch
+    graph.add_node("_company_branch_entry", company_branch_entry_node)
     graph.add_node("brave_domain_search", brave_domain_search_node)
+    graph.add_node("browser_domain_search", browser_domain_search_node)
     graph.add_node("enrich_company_apollo", enrich_apollo_node)
+    graph.add_node("compile_summary", compile_summary_node)
+
+    # Connection branch
     graph.add_node("build_queries", build_queries_node)
-    graph.add_node("run_brave_searches", run_brave_searches_node)
-    graph.add_node("run_browser_searches", run_browser_searches_node)
-    graph.add_node("review_leadership", review_leadership_node)
+    graph.add_node("launch_browser", launch_browser_node)
+    for tag in SEARCH_TAGS:
+        graph.add_node(f"brave_{tag}", make_brave_search_node(tag))
+        graph.add_node(f"browser_{tag}", make_browser_search_node(tag))
+    graph.add_node("review_leadership_brave", review_leadership_brave_node)
+    graph.add_node("review_leadership_playwright", review_leadership_playwright_node)
+    graph.add_node("close_browser", close_browser_node)
+
+    # Post-branch spine
     graph.add_node("merge_dedup", merge_dedup_node)
     graph.add_node("score_relevance", score_relevance_node)
     graph.add_node("filter_rank", filter_rank_node)
     graph.add_node("generate_notes", generate_notes_node)
-    graph.add_node("compile_summary", compile_summary_node)
     graph.add_node("save_results", save_results_node)
 
+    # Entry + preamble
     graph.set_entry_point("load_job")
     graph.add_edge("load_job", "precondition_check")
     graph.add_conditional_edges(
         "precondition_check",
         _analyze_jd_gate,
-        {
-            "analyze_jd": "analyze_jd",
-            "extract_domain_from_jd": "extract_domain_from_jd",
-        },
+        {"analyze_jd": "analyze_jd", "load_brave_key": "load_brave_key"},
     )
-    graph.add_edge("analyze_jd", "extract_domain_from_jd")
-    graph.add_edge("extract_domain_from_jd", "load_brave_key")
+    graph.add_edge("analyze_jd", "load_brave_key")
+
+    # Fork into both branches
     graph.add_conditional_edges(
         "load_brave_key",
-        _brave_domain_search_gate,
+        _fork_after_brave_key,
+        ["_company_branch_entry", "build_queries"],
+    )
+
+    # Company branch routing
+    graph.add_conditional_edges(
+        "_company_branch_entry",
+        _company_domain_gate,
         {
+            "enrich_company_apollo": "enrich_company_apollo",
             "brave_domain_search": "brave_domain_search",
-            "enrich_apollo_gate": "enrich_company_apollo",  # fall through
+            "launch_browser": "launch_browser",
         },
     )
     graph.add_edge("brave_domain_search", "enrich_company_apollo")
-    graph.add_conditional_edges(
-        "enrich_company_apollo",
-        _enrich_apollo_gate,
-        {
-            "enrich_company_apollo": "build_queries",
-            "build_queries": "build_queries",
-        },
-    )
+    graph.add_edge("browser_domain_search", "enrich_company_apollo")
+    graph.add_edge("enrich_company_apollo", "compile_summary")
+    graph.add_edge("compile_summary", "save_results")
+
+    # Connection branch routing
     graph.add_conditional_edges(
         "build_queries",
-        _search_path_gate,
-        {
-            "run_brave_searches": "run_brave_searches",
-            "run_browser_searches": "run_browser_searches",
-        },
+        _connection_lane_gate,
+        [
+            "brave_recruiter", "brave_ta", "brave_hiring_mgr",
+            "brave_hr", "brave_leadership", "launch_browser",
+        ],
     )
+
+    # launch_browser fans out to all Playwright consumers
+    for tag in SEARCH_TAGS:
+        graph.add_edge("launch_browser", f"browser_{tag}")
+    graph.add_edge("launch_browser", "browser_domain_search")
+
+    # Brave lane fan-in into merge_dedup
+    for tag in ("recruiter", "ta", "hiring_mgr", "hr"):
+        graph.add_edge(f"brave_{tag}", "merge_dedup")
     graph.add_conditional_edges(
-        "run_brave_searches",
-        _review_leadership_gate,
+        "brave_leadership",
+        _review_brave_gate,
         {
-            "review_leadership": "review_leadership",
+            "review_leadership_brave": "review_leadership_brave",
             "merge_dedup": "merge_dedup",
         },
     )
+    graph.add_edge("review_leadership_brave", "merge_dedup")
+
+    # Playwright lane fan-in through close_browser
+    for tag in ("recruiter", "ta", "hiring_mgr", "hr"):
+        graph.add_edge(f"browser_{tag}", "close_browser")
     graph.add_conditional_edges(
-        "run_browser_searches",
-        _review_leadership_gate,
+        "browser_leadership",
+        _review_playwright_gate,
         {
-            "review_leadership": "review_leadership",
-            "merge_dedup": "merge_dedup",
+            "review_leadership_playwright": "review_leadership_playwright",
+            "close_browser": "close_browser",
         },
     )
-    graph.add_edge("review_leadership", "merge_dedup")
+    graph.add_edge("review_leadership_playwright", "close_browser")
+    graph.add_edge("close_browser", "merge_dedup")
+
+    # Post-branch main spine
     graph.add_edge("merge_dedup", "score_relevance")
     graph.add_edge("score_relevance", "filter_rank")
     graph.add_edge("filter_rank", "generate_notes")
-    graph.add_edge("generate_notes", "compile_summary")
-    graph.add_edge("compile_summary", "save_results")
+    graph.add_edge("generate_notes", "save_results")
     graph.add_edge("save_results", END)
 
     return graph
