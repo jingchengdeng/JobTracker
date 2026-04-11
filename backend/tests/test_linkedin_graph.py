@@ -293,3 +293,199 @@ class TestGraphStructure:
         compiled_nodes = set(linkedin_graph.get_graph().nodes.keys())
         compiled_nodes -= {"__start__", "__end__"}
         assert len(compiled_nodes) == 29
+
+
+BRAVE_NAMES = {"brave_recruiter", "brave_ta", "brave_hiring_mgr", "brave_hr", "brave_leadership"}
+BROWSER_NAMES = {"browser_recruiter", "browser_ta", "browser_hiring_mgr",
+                 "browser_hr", "browser_leadership"}
+
+
+def _minimal_state(**overrides) -> dict:
+    """Build a LinkedinState dict good enough to invoke the compiled graph.
+
+    The individual nodes are all patched out so this skips DB I/O, LLM calls
+    and Playwright — we only care about which node names fire.
+    """
+    state = {
+        "search_id": 999,
+        "job_id": 999,
+        "workflow_run_id": "test-lane-skip",
+        "job": {"id": 999, "title": "SWE", "company": "TestCo", "description": "desc"},
+        "mode": "full",
+        "analysis": {
+            "role_title": "SWE", "role_domain": "engineering", "seniority": "senior",
+            "leadership_titles": ["Eng Mgr"], "department_keywords": [],
+        },
+        "queries": [
+            {"query": "q", "tag": "recruiter"},
+            {"query": "q", "tag": "ta"},
+            {"query": "q", "tag": "hiring_mgr"},
+            {"query": "q", "tag": "hr"},
+            {"query": "q", "tag": "leadership"},
+        ],
+    }
+    state.update(overrides)
+    return state
+
+
+class TestLaneSkipRouting:
+    """Patch every leaf node to a name-recorder and invoke the compiled graph
+    with either brave_key set or not. Assert only the active lane fired."""
+
+    @pytest.mark.asyncio
+    async def test_brave_lane_runs_browser_lane_skipped(self, monkeypatch):
+        from src.agents import linkedin_graph
+
+        called: set[str] = set()
+
+        def _recorder(name: str):
+            async def _node(state):
+                called.add(name)
+                if name.startswith("brave_") and name != "brave_domain_search":
+                    return {"search_results": {name.removeprefix("brave_"): []}}
+                if name.startswith("browser_") and name != "browser_domain_search":
+                    return {"search_results": {name.removeprefix("browser_"): []}}
+                return {}
+            return _node
+
+        for real_name in (
+            "load_job_node", "precondition_check_node", "analyze_jd_node",
+            "load_brave_key_node", "company_branch_entry_node",
+            "brave_domain_search_node", "browser_domain_search_node",
+            "enrich_apollo_node", "compile_summary_node", "build_queries_node",
+            "launch_browser_node", "close_browser_node",
+            "review_leadership_brave_node", "review_leadership_playwright_node",
+            "merge_dedup_node", "score_relevance_node", "filter_rank_node",
+            "generate_notes_node", "save_results_node",
+        ):
+            monkeypatch.setattr(
+                linkedin_graph, real_name,
+                _recorder(real_name.removesuffix("_node")),
+            )
+        monkeypatch.setattr(
+            linkedin_graph, "make_brave_search_node",
+            lambda tag: _recorder(f"brave_{tag}"),
+        )
+        monkeypatch.setattr(
+            linkedin_graph, "make_browser_search_node",
+            lambda tag: _recorder(f"browser_{tag}"),
+        )
+
+        graph = linkedin_graph.build_linkedin_graph().compile()
+
+        state = _minimal_state(brave_key="brave-key-set")
+        await graph.ainvoke(state)
+
+        assert BRAVE_NAMES <= called, f"brave lane missing nodes: {BRAVE_NAMES - called}"
+        assert not (BROWSER_NAMES & called), f"browser lane ran: {BROWSER_NAMES & called}"
+        assert "launch_browser" not in called
+        assert "close_browser" not in called
+
+    @pytest.mark.asyncio
+    async def test_browser_lane_runs_brave_lane_skipped(self, monkeypatch):
+        from src.agents import linkedin_graph
+
+        called: set[str] = set()
+
+        def _recorder(name: str):
+            async def _node(state):
+                called.add(name)
+                return {}
+            return _node
+
+        for real_name in (
+            "load_job_node", "precondition_check_node", "analyze_jd_node",
+            "load_brave_key_node", "company_branch_entry_node",
+            "brave_domain_search_node", "browser_domain_search_node",
+            "enrich_apollo_node", "compile_summary_node", "build_queries_node",
+            "launch_browser_node", "close_browser_node",
+            "review_leadership_brave_node", "review_leadership_playwright_node",
+            "merge_dedup_node", "score_relevance_node", "filter_rank_node",
+            "generate_notes_node", "save_results_node",
+        ):
+            monkeypatch.setattr(
+                linkedin_graph, real_name,
+                _recorder(real_name.removesuffix("_node")),
+            )
+        monkeypatch.setattr(
+            linkedin_graph, "make_brave_search_node",
+            lambda tag: _recorder(f"brave_{tag}"),
+        )
+        monkeypatch.setattr(
+            linkedin_graph, "make_browser_search_node",
+            lambda tag: _recorder(f"browser_{tag}"),
+        )
+        graph = linkedin_graph.build_linkedin_graph().compile()
+
+        state = _minimal_state()  # no brave_key
+        await graph.ainvoke(state)
+
+        assert BROWSER_NAMES <= called, f"browser lane missing nodes: {BROWSER_NAMES - called}"
+        assert not (BRAVE_NAMES & called), f"brave lane ran: {BRAVE_NAMES & called}"
+        assert "launch_browser" in called
+        assert "close_browser" in called
+
+
+class TestParallelExecutionTiming:
+    @pytest.mark.asyncio
+    async def test_five_brave_nodes_run_concurrently(self, monkeypatch):
+        """Mock each brave search to sleep 0.2s. If they ran sequentially total
+        would be >=1.0s; parallel should be <0.5s."""
+        from src.agents import linkedin_graph
+
+        async def _slow_brave(query, api_key, max_results=15):
+            await asyncio.sleep(0.2)
+            return []
+
+        monkeypatch.setattr(linkedin_graph, "brave_search_profiles", _slow_brave)
+
+        async def _noop(state):
+            return {}
+
+        for real_name in (
+            "load_job_node", "precondition_check_node", "analyze_jd_node",
+            "load_brave_key_node", "company_branch_entry_node",
+            "brave_domain_search_node", "browser_domain_search_node",
+            "enrich_apollo_node", "compile_summary_node",
+            "launch_browser_node", "close_browser_node",
+            "review_leadership_brave_node", "review_leadership_playwright_node",
+            "merge_dedup_node", "score_relevance_node", "filter_rank_node",
+            "generate_notes_node", "save_results_node",
+        ):
+            monkeypatch.setattr(linkedin_graph, real_name, _noop)
+
+        async def _build_queries(state):
+            return {
+                "queries": [
+                    {"query": f"q{t}", "tag": t} for t in
+                    ("recruiter", "ta", "hiring_mgr", "hr", "leadership")
+                ],
+            }
+
+        monkeypatch.setattr(linkedin_graph, "build_queries_node", _build_queries)
+
+        # Replace the factory so the generated brave nodes call the already-patched
+        # brave_search_profiles without the @track_node DB overhead.
+        def _slow_brave_factory(tag: str):
+            async def _node(state):
+                query = state.get("queries", [])
+                brave_key = state.get("brave_key")
+                if not query or not brave_key:
+                    return {}
+                await linkedin_graph.brave_search_profiles(f"q_{tag}", brave_key, 15)
+                return {"search_results": {tag: []}}
+            return _node
+
+        monkeypatch.setattr(linkedin_graph, "make_brave_search_node", _slow_brave_factory)
+        monkeypatch.setattr(
+            linkedin_graph, "make_browser_search_node",
+            lambda tag: _noop,
+        )
+
+        graph = linkedin_graph.build_linkedin_graph().compile()
+
+        start = time.monotonic()
+        await graph.ainvoke(_minimal_state(brave_key="k"))
+        elapsed = time.monotonic() - start
+
+        assert elapsed < 0.7, f"parallel fan-out took {elapsed:.2f}s, expected <0.7s"
