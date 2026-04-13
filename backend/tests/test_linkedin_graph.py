@@ -554,6 +554,78 @@ class TestSaveResultsJoin:
         assert counts.get("generate_notes", 0) == 1
 
 
+class TestMergeDedupJoin:
+    @pytest.mark.asyncio
+    async def test_merge_dedup_fires_once_when_review_branch_taken(self, monkeypatch):
+        """merge_dedup must wait for all predecessors across supersteps.
+
+        When ``_review_brave_gate`` routes brave_leadership through
+        review_leadership_brave, the 4 other brave_* edges resolve one
+        superstep earlier than the review path. Without defer=True,
+        merge_dedup fires in both supersteps and writes ``merged`` twice,
+        throwing InvalidUpdateError on the second write.
+        """
+        from src.agents import linkedin_graph
+
+        counts: dict[str, int] = {}
+
+        def _recorder(name: str):
+            async def _node(state):
+                counts[name] = counts.get(name, 0) + 1
+                return {}
+            return _node
+
+        # Leadership brave node must populate search_results["leadership"]
+        # so _review_brave_gate picks review_leadership_brave and forces the
+        # multi-superstep convergence that triggers the bug.
+        def _brave_factory(tag):
+            if tag == "leadership":
+                async def _leadership(state):
+                    counts[f"brave_{tag}"] = counts.get(f"brave_{tag}", 0) + 1
+                    return {"search_results": {"leadership": [{"linkedin_url": "u"}]}}
+                return _leadership
+            return _recorder(f"brave_{tag}")
+
+        for real_name in (
+            "load_job_node", "precondition_check_node", "analyze_jd_node",
+            "load_brave_key_node", "company_branch_entry_node",
+            "brave_domain_search_node", "browser_domain_search_node",
+            "enrich_apollo_node", "compile_summary_node",
+            "launch_browser_node", "close_browser_node",
+            "review_leadership_brave_node", "review_leadership_playwright_node",
+            "merge_dedup_node", "score_relevance_node", "filter_rank_node",
+            "generate_notes_node", "save_results_node",
+        ):
+            monkeypatch.setattr(
+                linkedin_graph, real_name,
+                _recorder(real_name.removesuffix("_node")),
+            )
+
+        async def _build_queries(state):
+            return {
+                "queries": [
+                    {"query": f"q{t}", "tag": t} for t in
+                    ("recruiter", "ta", "hiring_mgr", "hr", "leadership")
+                ],
+            }
+
+        monkeypatch.setattr(linkedin_graph, "build_queries_node", _build_queries)
+        monkeypatch.setattr(linkedin_graph, "make_brave_search_node", _brave_factory)
+        monkeypatch.setattr(
+            linkedin_graph, "make_browser_search_node",
+            lambda tag: _recorder(f"browser_{tag}"),
+        )
+
+        graph = linkedin_graph.build_linkedin_graph().compile()
+        await graph.ainvoke(_minimal_state(brave_key="k"))
+
+        assert counts.get("merge_dedup", 0) == 1, (
+            f"merge_dedup fired {counts.get('merge_dedup', 0)} times, expected 1. "
+            f"Full counts: {counts}"
+        )
+        assert counts.get("review_leadership_brave", 0) == 1
+
+
 class TestSharedBrowserLaunchedOnce:
     @pytest.mark.asyncio
     async def test_playwright_lane_launches_browser_exactly_once(

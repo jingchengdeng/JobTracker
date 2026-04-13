@@ -396,20 +396,6 @@ async def _connection_lane_gate(state: LinkedinState) -> list[str]:
     return ["launch_browser"]
 
 
-async def _review_brave_gate(state: LinkedinState) -> str:
-    results = state.get("search_results") or {}
-    if results.get("leadership") and state.get("analysis"):
-        return "review_leadership_brave"
-    return "merge_dedup"
-
-
-async def _review_playwright_gate(state: LinkedinState) -> str:
-    results = state.get("search_results") or {}
-    if results.get("leadership") and state.get("analysis"):
-        return "review_leadership_playwright"
-    return "close_browser"
-
-
 def build_linkedin_graph() -> StateGraph:
     graph = StateGraph(LinkedinState)
 
@@ -494,30 +480,21 @@ def build_linkedin_graph() -> StateGraph:
         graph.add_edge("launch_browser", f"browser_{tag}")
     graph.add_edge("launch_browser", "browser_domain_search")
 
-    # Brave lane fan-in into merge_dedup
-    for tag in ("recruiter", "ta", "hiring_mgr", "hr"):
-        graph.add_edge(f"brave_{tag}", "merge_dedup")
-    graph.add_conditional_edges(
-        "brave_leadership",
-        _review_brave_gate,
-        {
-            "review_leadership_brave": "review_leadership_brave",
-            "merge_dedup": "merge_dedup",
-        },
-    )
+    # Brave lane fan-in: all 5 brave_* converge on review_leadership_brave
+    # in a single superstep, then review_leadership_brave → merge_dedup.
+    # review_leadership_brave early-returns when leadership results are
+    # absent, so it's safe to always route through it. The review node doubles
+    # as the lane-join point; without this single-wave convergence, the
+    # conditional review gate would stall 4 of the 5 edges one superstep ahead
+    # of the 5th, firing merge_dedup twice and exploding the `merged` channel.
+    for tag in SEARCH_TAGS:
+        graph.add_edge(f"brave_{tag}", "review_leadership_brave")
     graph.add_edge("review_leadership_brave", "merge_dedup")
 
-    # Playwright lane fan-in through close_browser
-    for tag in ("recruiter", "ta", "hiring_mgr", "hr"):
-        graph.add_edge(f"browser_{tag}", "close_browser")
-    graph.add_conditional_edges(
-        "browser_leadership",
-        _review_playwright_gate,
-        {
-            "review_leadership_playwright": "review_leadership_playwright",
-            "close_browser": "close_browser",
-        },
-    )
+    # Playwright lane fan-in: same join pattern. 5 browser_* → review →
+    # close_browser → merge_dedup.
+    for tag in SEARCH_TAGS:
+        graph.add_edge(f"browser_{tag}", "review_leadership_playwright")
     graph.add_edge("review_leadership_playwright", "close_browser")
     graph.add_edge("close_browser", "merge_dedup")
 
