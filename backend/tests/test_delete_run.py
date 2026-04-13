@@ -16,10 +16,24 @@ def test_db(tmp_path, monkeypatch):
             status TEXT DEFAULT 'pending', conversation_summary TEXT, error TEXT,
             created_at TEXT DEFAULT (datetime('now')), completed_at TEXT
         );
-        CREATE TABLE ai_steps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, step_type TEXT,
-            status TEXT, result TEXT, version INTEGER DEFAULT 1,
-            created_at TEXT DEFAULT (datetime('now')), completed_at TEXT
+        CREATE TABLE pipeline_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workflow_run_id TEXT NOT NULL,
+            job_id INTEGER,
+            graph TEXT NOT NULL,
+            node_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            attempt INTEGER NOT NULL DEFAULT 1,
+            started_at TEXT DEFAULT (datetime('now')),
+            completed_at TEXT,
+            duration_ms INTEGER,
+            error TEXT,
+            traceback TEXT,
+            run_id INTEGER,
+            step_type TEXT,
+            result TEXT,
+            version INTEGER NOT NULL DEFAULT 1,
+            round_number INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE ai_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, role TEXT,
@@ -27,10 +41,12 @@ def test_db(tmp_path, monkeypatch):
         );
         INSERT INTO ai_runs (id, job_id, resume_id, status)
             VALUES (1, 1, 1, 'completed'), (2, 1, 1, 'running');
-        INSERT INTO ai_steps (run_id, step_type, status, result)
-            VALUES (1, 'jd_analysis', 'completed', '{}'),
-                   (1, 'gap_analysis', 'completed', '{}'),
-                   (2, 'jd_analysis', 'running', NULL);
+        INSERT INTO pipeline_events (
+            workflow_run_id, graph, node_name, status, run_id, step_type, result
+        ) VALUES
+            ('wr-1', 'resume', 'jd_analysis', 'completed', 1, 'jd_analysis', '{}'),
+            ('wr-1', 'resume', 'gap_analysis', 'completed', 1, 'gap_analysis', '{}'),
+            ('wr-2', 'resume', 'jd_analysis', 'running', 2, 'jd_analysis', NULL);
         INSERT INTO ai_messages (run_id, role, content, round_number)
             VALUES (1, 'user', 'hi', 1), (1, 'assistant', 'hello', 1);
         """
@@ -44,7 +60,10 @@ def test_db(tmp_path, monkeypatch):
 def _counts(db_path, run_id):
     conn = sqlite3.connect(db_path)
     runs = conn.execute("SELECT COUNT(*) FROM ai_runs WHERE id = ?", (run_id,)).fetchone()[0]
-    steps = conn.execute("SELECT COUNT(*) FROM ai_steps WHERE run_id = ?", (run_id,)).fetchone()[0]
+    steps = conn.execute(
+        "SELECT COUNT(*) FROM pipeline_events WHERE run_id = ? AND graph = 'resume'",
+        (run_id,),
+    ).fetchone()[0]
     msgs = conn.execute("SELECT COUNT(*) FROM ai_messages WHERE run_id = ?", (run_id,)).fetchone()[0]
     conn.close()
     return runs, steps, msgs

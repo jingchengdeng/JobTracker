@@ -36,9 +36,16 @@ export type Source = (typeof SOURCES)[number];
 export type GoalType = (typeof GOAL_TYPES)[number];
 
 export const AI_RUN_STATUSES = ["pending", "running", "completed", "failed"] as const;
-export const AI_STEP_TYPES = ["jd_analysis", "gap_analysis", "suggestions", "rewrite"] as const;
-export const AI_STEP_STATUSES = ["pending", "running", "completed", "failed"] as const;
 export const AI_MESSAGE_ROLES = ["user", "assistant"] as const;
+
+export const PIPELINE_EVENT_STATUSES = [
+  "pending",
+  "running",
+  "completed",
+  "failed",
+  "skipped",
+] as const;
+export type PipelineEventStatus = (typeof PIPELINE_EVENT_STATUSES)[number];
 export const RESUME_FILE_TYPES = ["pdf", "docx"] as const;
 
 export const INTERVIEW_STATUSES = ["planning", "active", "paused", "completed", "interrupted"] as const;
@@ -47,8 +54,6 @@ export const INTERVIEW_DIFFICULTIES = ["easy", "medium", "hard"] as const;
 export const INTERVIEW_TURN_ROLES = ["interviewer", "candidate"] as const;
 
 export type AiRunStatus = (typeof AI_RUN_STATUSES)[number];
-export type AiStepType = (typeof AI_STEP_TYPES)[number];
-export type AiStepStatus = (typeof AI_STEP_STATUSES)[number];
 export type AiMessageRole = (typeof AI_MESSAGE_ROLES)[number];
 export type ResumeFileType = (typeof RESUME_FILE_TYPES)[number];
 
@@ -172,17 +177,6 @@ export interface AiRun {
   status: AiRunStatus;
   conversationSummary: string | null;
   error: string | null;
-  createdAt: string;
-  completedAt: string | null;
-}
-
-export interface AiStep {
-  id: number;
-  runId: number;
-  stepType: AiStepType;
-  status: AiStepStatus;
-  result: string | null;
-  version: number;
   createdAt: string;
   completedAt: string | null;
 }

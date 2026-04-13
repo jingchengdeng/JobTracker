@@ -1,15 +1,18 @@
 import logging
+import uuid
 from typing import TypedDict
 
 from langgraph.graph import StateGraph, END
 from langgraph.types import Send
 
+from src.agents.pipeline_tracking import track_node, TrackBehavior
 from src.db import get_connection
 
 logger = logging.getLogger(__name__)
 
 
 class MasterWorkflowState(TypedDict):
+    workflow_run_id: str
     # Extraction inputs (matches ExtractionState field names)
     raw_text: str
     url: str
@@ -26,6 +29,7 @@ class MasterWorkflowState(TypedDict):
     default_resume_name: str | None
 
 
+@track_node("master", "resolve_default_resume", TrackBehavior.SINGLE_SHOT)
 async def resolve_default_resume(state: MasterWorkflowState) -> dict:
     """Query DB for the default resume (is_default=1)."""
     async with get_connection() as conn:
@@ -47,19 +51,21 @@ async def resolve_default_resume(state: MasterWorkflowState) -> dict:
     }
 
 
-def _should_fan_out(state: MasterWorkflowState) -> str:
+async def _should_fan_out(state: MasterWorkflowState) -> str:
     """Conditional edge after insert_job: stop if no valid job_id or error."""
     if not state.get("job_id") or state.get("error"):
         return "end"
     return "resolve_default_resume"
 
 
-def fan_out(state: MasterWorkflowState) -> list[Send]:
+async def fan_out(state: MasterWorkflowState) -> list[Send]:
     """Dispatch parallel branches via Send()."""
+    workflow_run_id = state.get("workflow_run_id")
     sends = []
     # LinkedIn branch always runs
     sends.append(Send("linkedin_branch", {
         "job_id": state["job_id"],
+        "workflow_run_id": workflow_run_id,
     }))
     # Resume branch only if default resume exists and has text
     if state.get("default_resume_id") and state.get("default_resume_text"):
@@ -69,10 +75,12 @@ def fan_out(state: MasterWorkflowState) -> list[Send]:
             "resume_text": state["default_resume_text"],
             "resume_name": state["default_resume_name"],
             "description": state.get("extracted", {}).get("description") if state.get("extracted") else None,
+            "workflow_run_id": workflow_run_id,
         }))
     return sends
 
 
+@track_node("master", "resume_branch", TrackBehavior.SINGLE_SHOT)
 async def resume_branch(state: dict) -> dict:
     """Run the full resume tailor pipeline. MUST NOT raise."""
     run_id = None
@@ -93,6 +101,7 @@ async def resume_branch(state: dict) -> dict:
             jd_text=state.get("description") or "",
             resume_text=state["resume_text"],
             round_number=0,
+            workflow_run_id=state.get("workflow_run_id"),
         )
     except Exception as exc:
         logger.error("Resume tailor branch failed for job %s: %s", state["job_id"], exc)
@@ -109,13 +118,17 @@ async def resume_branch(state: dict) -> dict:
     return {}
 
 
+@track_node("master", "linkedin_branch", TrackBehavior.SINGLE_SHOT)
 async def linkedin_branch(state: dict) -> dict:
     """Run the LinkedIn research pipeline. MUST NOT raise."""
     try:
         from src.agents.linkedin_db import create_search
         from src.agents.linkedin_pipeline import run_linkedin_pipeline
         search_id = await create_search(job_id=state["job_id"])
-        await run_linkedin_pipeline(search_id, state["job_id"])
+        await run_linkedin_pipeline(
+            search_id, state["job_id"],
+            workflow_run_id=state.get("workflow_run_id"),
+        )
     except Exception as exc:
         logger.error("LinkedIn research branch failed for job %s: %s", state["job_id"], exc)
     return {}
@@ -130,13 +143,15 @@ def build_master_graph() -> StateGraph:
         _handle_failure,
     )
 
+    fail_node = track_node("master", "fail_node", TrackBehavior.SINGLE_SHOT)(_handle_failure)
+
     graph = StateGraph(MasterWorkflowState)
 
     # Extraction nodes
     graph.add_node("extract_fields", extract_fields)
     graph.add_node("validate_fields", validate_fields)
     graph.add_node("insert_job", insert_job)
-    graph.add_node("fail", _handle_failure)
+    graph.add_node("fail_node", fail_node)
 
     # Post-insert nodes
     graph.add_node("resolve_default_resume", resolve_default_resume)
@@ -152,7 +167,7 @@ def build_master_graph() -> StateGraph:
         {
             "insert_job": "insert_job",
             "extract_fields": "extract_fields",
-            "fail": "fail",
+            "fail": "fail_node",
         },
     )
     graph.add_conditional_edges(
@@ -166,8 +181,12 @@ def build_master_graph() -> StateGraph:
     graph.add_conditional_edges(
         "resolve_default_resume",
         fan_out,
+        {
+            "resume_branch": "resume_branch",
+            "linkedin_branch": "linkedin_branch",
+        },
     )
-    graph.add_edge("fail", END)
+    graph.add_edge("fail_node", END)
     graph.add_edge("resume_branch", END)
     graph.add_edge("linkedin_branch", END)
 
@@ -177,9 +196,12 @@ def build_master_graph() -> StateGraph:
 _compiled_master_graph = build_master_graph().compile()
 
 
-async def run_master_workflow(raw_text: str, url: str) -> dict:
+async def run_master_workflow(
+    raw_text: str, url: str, workflow_run_id: str | None = None,
+) -> dict:
     """Run the full master workflow. Returns {job_id, error}."""
     initial_state: MasterWorkflowState = {
+        "workflow_run_id": workflow_run_id or str(uuid.uuid4()),
         "raw_text": raw_text,
         "url": url,
         "extracted": None,

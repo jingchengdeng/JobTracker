@@ -21,19 +21,6 @@ logger = logging.getLogger("jobtracker")
 _background_tasks: set[asyncio.Task] = set()
 
 
-def _ensure_round_number_column() -> None:
-    """Add round_number column to ai_steps if missing. Idempotent."""
-    conn = get_sync_connection()
-    try:
-        cols = {r[1] for r in conn.execute("PRAGMA table_info(ai_steps)").fetchall()}
-        if "round_number" not in cols:
-            conn.execute(
-                "ALTER TABLE ai_steps ADD COLUMN round_number INTEGER NOT NULL DEFAULT 0"
-            )
-            conn.commit()
-    finally:
-        conn.close()
-
 
 def _ensure_resume_columns() -> None:
     """Add is_default and index tracking columns to resumes if missing. Idempotent."""
@@ -81,7 +68,6 @@ def _ensure_interview_plans_table() -> None:
 async def lifespan(app: FastAPI):
     # Pre-event-loop startup (sync, idempotent schema migrations)
     try:
-        _ensure_round_number_column()
         _ensure_resume_columns()
         _ensure_interview_plans_table()
         _ensure_linkedin_tables()
@@ -94,6 +80,16 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("LangSmith tracing disabled (set LANGSMITH_API_KEY to enable)")
 
+    # Async startup: migrate ai_steps → pipeline_events if needed.
+    # Runs BEFORE ai_runs recovery because the recovery block also needs
+    # to mark interrupted pipeline_events rows as failed, and that table
+    # must exist first.
+    try:
+        from src.db_migrations import migrate_ai_steps_to_pipeline_events
+        await migrate_ai_steps_to_pipeline_events()
+    except Exception as exc:
+        logger.exception("pipeline_events migration failed")
+
     # Async startup: mark interrupted runs as failed
     try:
         async with get_connection() as conn:
@@ -104,6 +100,19 @@ async def lifespan(app: FastAPI):
             await conn.commit()
     except Exception as exc:
         logger.warning("Stale-run recovery skipped: %s", exc)
+
+    # Mark interrupted pipeline_events rows as failed (debug tab recovery).
+    try:
+        async with get_connection() as conn:
+            await conn.execute(
+                "UPDATE pipeline_events SET status = 'failed', "
+                "error = 'Interrupted — server restarted mid-run', "
+                "completed_at = datetime('now') "
+                "WHERE status IN ('pending', 'running')"
+            )
+            await conn.commit()
+    except Exception as exc:
+        logger.exception("pipeline_events startup recovery failed")
 
     try:
         async with get_connection() as conn:
@@ -225,12 +234,14 @@ from src.api.embedding_routes import router as embedding_router
 from src.api.interview_routes import router as interview_router
 from src.api.linkedin_routes import router as linkedin_router
 from src.api.extension_routes import router as extension_router
+from src.api.pipeline_routes import router as pipeline_router
 
 app.include_router(router)
 app.include_router(embedding_router)
 app.include_router(interview_router)
 app.include_router(linkedin_router)
 app.include_router(extension_router)
+app.include_router(pipeline_router)
 
 
 from fastapi import WebSocket

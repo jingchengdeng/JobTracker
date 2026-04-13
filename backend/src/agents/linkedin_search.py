@@ -12,6 +12,22 @@ logger = logging.getLogger(__name__)
 
 SEARCH_DELAY_SECONDS = 1.5
 
+# Lazy shared HTTP client for Brave Search API. Parallel fan-out reuses
+# one connection pool instead of six. Guarded by an asyncio.Lock so
+# concurrent first callers don't race on initialisation.
+_brave_client_instance: httpx.AsyncClient | None = None
+_brave_client_lock = asyncio.Lock()
+
+
+async def _brave_client() -> httpx.AsyncClient:
+    global _brave_client_instance
+    if _brave_client_instance is None:
+        async with _brave_client_lock:
+            if _brave_client_instance is None:
+                _brave_client_instance = httpx.AsyncClient(timeout=15.0)
+    return _brave_client_instance
+
+
 # Chromium args to reduce bot detection footprint.
 _BROWSER_ARGS = [
     "--disable-blink-features=AutomationControlled",
@@ -112,13 +128,12 @@ _BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 async def brave_search_profiles(query: str, api_key: str, max_results: int = 15) -> list[dict]:
     """Search Brave for LinkedIn profiles. Returns parsed person records."""
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                _BRAVE_ENDPOINT,
-                params={"q": query, "count": max_results},
-                headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
-                timeout=15.0,
-            )
+        client = await _brave_client()
+        resp = await client.get(
+            _BRAVE_ENDPOINT,
+            params={"q": query, "count": max_results},
+            headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
+        )
         if resp.status_code != 200:
             logger.warning("Brave API returned %s for '%s'", resp.status_code, query[:80])
             return []
@@ -176,13 +191,12 @@ async def brave_search_domain(company: str, api_key: str) -> str | None:
     Returns root domain (e.g., 'deloitte.com' not 'resources.deloitte.com').
     """
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                _BRAVE_ENDPOINT,
-                params={"q": f'"{company}" official website', "count": 5},
-                headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
-                timeout=15.0,
-            )
+        client = await _brave_client()
+        resp = await client.get(
+            _BRAVE_ENDPOINT,
+            params={"q": f'"{company}" official website', "count": 5},
+            headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
+        )
         if resp.status_code != 200:
             logger.warning("Brave domain search returned %s for '%s'", resp.status_code, company)
             return None

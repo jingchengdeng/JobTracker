@@ -6,6 +6,7 @@ from src.models.provider import get_chat_model
 from src.models.schemas import JdAnalysis, GapAnalysis, Suggestions, RewriteResult
 from src.memory.rag import query_resume_corpus
 from src.memory.preferences import load_all_preferences
+from src.agents.pipeline_tracking import track_node, TrackBehavior
 
 
 def build_system_prompt(preferences: list[str], conversation_summary: str | None) -> str:
@@ -27,6 +28,7 @@ def build_system_prompt(preferences: list[str], conversation_summary: str | None
     return "\n".join(parts)
 
 
+@track_node("resume", "jd_analysis", TrackBehavior.VERSION_ON_RERUN)
 async def step_jd_analysis(state: dict) -> dict:
     """Analyze the job description and extract structured requirements."""
     llm = await get_chat_model()
@@ -49,6 +51,7 @@ async def step_jd_analysis(state: dict) -> dict:
     return {**state, "jd_analysis": result.model_dump_json(), "preferences": preferences}
 
 
+@track_node("resume", "rag_retrieval", TrackBehavior.VERSION_ON_RERUN)
 async def step_rag_retrieval(state: dict) -> dict:
     """Retrieve relevant experience from the resume corpus using RAG."""
     jd_analysis = JdAnalysis.model_validate_json(state["jd_analysis"])
@@ -77,6 +80,7 @@ async def step_rag_retrieval(state: dict) -> dict:
     return {**state, "rag_chunks": rag_context}
 
 
+@track_node("resume", "gap_analysis", TrackBehavior.VERSION_ON_RERUN)
 async def step_gap_analysis(state: dict) -> dict:
     """Compare JD requirements against the resume and RAG-retrieved experience."""
     llm = await get_chat_model()
@@ -112,6 +116,7 @@ async def step_gap_analysis(state: dict) -> dict:
     return {**state, "gap_analysis": result.model_dump_json()}
 
 
+@track_node("resume", "suggestions", TrackBehavior.VERSION_ON_RERUN)
 async def step_suggestions(state: dict) -> dict:
     """Generate section-by-section rewrite suggestions."""
     llm = await get_chat_model()
@@ -146,6 +151,7 @@ async def step_suggestions(state: dict) -> dict:
     return {**state, "suggestions": result.model_dump_json()}
 
 
+@track_node("resume", "rewrite", TrackBehavior.VERSION_ON_RERUN)
 async def step_rewrite(state: dict) -> dict:
     """Generate the full rewritten resume."""
     llm = await get_chat_model()

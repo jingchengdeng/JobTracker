@@ -42,6 +42,31 @@ class TestJdAnalysis:
         )
         assert jd.department_keywords == []
 
+    def test_domain_optional_defaults_none(self):
+        from src.agents.linkedin_schemas import JdAnalysis
+
+        analysis = JdAnalysis(
+            role_title="SWE",
+            role_domain="engineering",
+            seniority="senior",
+            leadership_titles=["Engineering Manager"],
+            department_keywords=["backend"],
+        )
+        assert analysis.domain is None
+
+    def test_domain_accepts_string(self):
+        from src.agents.linkedin_schemas import JdAnalysis
+
+        analysis = JdAnalysis(
+            role_title="SWE",
+            role_domain="engineering",
+            seniority="senior",
+            leadership_titles=[],
+            department_keywords=[],
+            domain="stripe.com",
+        )
+        assert analysis.domain == "stripe.com"
+
 
 class TestPersonRelevanceScore:
     def test_valid_construction(self):
@@ -223,3 +248,4 @@ class TestLeadershipReview:
             needs_retry=False,
         )
         assert review.refined_query is None
+

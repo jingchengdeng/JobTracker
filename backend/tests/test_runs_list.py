@@ -24,10 +24,24 @@ def test_db(tmp_path, monkeypatch):
             status TEXT DEFAULT 'pending', conversation_summary TEXT, error TEXT,
             created_at TEXT DEFAULT (datetime('now')), completed_at TEXT
         );
-        CREATE TABLE ai_steps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, step_type TEXT,
-            status TEXT DEFAULT 'pending', result TEXT, version INTEGER DEFAULT 1,
-            created_at TEXT DEFAULT (datetime('now')), completed_at TEXT
+        CREATE TABLE pipeline_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workflow_run_id TEXT NOT NULL,
+            job_id INTEGER,
+            graph TEXT NOT NULL,
+            node_name TEXT NOT NULL,
+            status TEXT NOT NULL,
+            attempt INTEGER NOT NULL DEFAULT 1,
+            started_at TEXT DEFAULT (datetime('now')),
+            completed_at TEXT,
+            duration_ms INTEGER,
+            error TEXT,
+            traceback TEXT,
+            run_id INTEGER,
+            step_type TEXT,
+            result TEXT,
+            version INTEGER NOT NULL DEFAULT 1,
+            round_number INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE ai_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, role TEXT,
@@ -54,8 +68,11 @@ def _insert_run(db_path, run_id, resume_id, status, created_at, gap_result=None)
     )
     if gap_result is not None:
         conn.execute(
-            "INSERT INTO ai_steps (run_id, step_type, status, result, version) "
-            "VALUES (?, 'gap_analysis', 'completed', ?, 1)",
+            "INSERT INTO pipeline_events ("
+            "workflow_run_id, graph, node_name, status, run_id, step_type, "
+            "result, version, round_number"
+            ") VALUES ('wr-test', 'resume', 'gap_analysis', 'completed', ?, "
+            "'gap_analysis', ?, 1, 0)",
             (run_id, gap_result),
         )
     conn.commit()
@@ -118,3 +135,35 @@ def test_list_empty_for_job_with_no_runs(test_db):
     resp = client.get("/api/jobs/1/runs")
     assert resp.status_code == 200
     assert resp.json() == []
+
+
+def test_get_run_response_shape_matches_legacy_ai_steps_contract(test_db):
+    """The resume-tailor frontend reads these exact fields. Ensure pipeline_events
+    query returns a compatible payload."""
+    conn = sqlite3.connect(test_db)
+    conn.execute(
+        "INSERT INTO ai_runs (id, job_id, resume_id, status, created_at) "
+        "VALUES (1, 1, 10, 'completed', '2026-04-05T10:00:00')"
+    )
+    conn.execute(
+        "INSERT INTO pipeline_events ("
+        "workflow_run_id, graph, node_name, status, run_id, step_type, "
+        "version, round_number, result"
+        ") VALUES ('wr-1', 'resume', 'jd_analysis', 'completed', 1, "
+        "'jd_analysis', 1, 0, 'R')"
+    )
+    conn.commit()
+    conn.close()
+
+    client = TestClient(app)
+    resp = client.get("/api/runs/1")
+    assert resp.status_code == 200
+    data = resp.json()
+    steps = data["steps"]
+    assert len(steps) == 1
+    step = steps[0]
+    expected_keys = {
+        "id", "run_id", "step_type", "status", "result",
+        "version", "round_number", "created_at", "completed_at",
+    }
+    assert set(step.keys()) == expected_keys

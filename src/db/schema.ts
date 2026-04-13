@@ -7,8 +7,6 @@ import {
   SOURCES,
   GOAL_TYPES,
   AI_RUN_STATUSES,
-  AI_STEP_TYPES,
-  AI_STEP_STATUSES,
   AI_MESSAGE_ROLES,
   RESUME_FILE_TYPES,
   INTERVIEW_STATUSES,
@@ -92,7 +90,7 @@ export const aiRuns = sqliteTable("ai_runs", {
   id: integer().primaryKey({ autoIncrement: true }),
   jobId: integer("job_id")
     .notNull()
-    .references(() => jobs.id),
+    .references(() => jobs.id, { onDelete: "cascade" }),
   resumeId: integer("resume_id")
     .notNull()
     .references(() => resumes.id),
@@ -105,27 +103,31 @@ export const aiRuns = sqliteTable("ai_runs", {
   completedAt: text("completed_at"),
 });
 
-export const aiSteps = sqliteTable("ai_steps", {
+export const pipelineEvents = sqliteTable("pipeline_events", {
   id: integer().primaryKey({ autoIncrement: true }),
-  runId: integer("run_id")
-    .notNull()
-    .references(() => aiRuns.id),
-  stepType: text("step_type", { enum: AI_STEP_TYPES }).notNull(),
-  status: text({ enum: AI_STEP_STATUSES }).notNull().default("pending"),
+  workflowRunId: text("workflow_run_id").notNull(),
+  jobId: integer("job_id").references(() => jobs.id, { onDelete: "cascade" }),
+  graph: text().notNull(),
+  nodeName: text("node_name").notNull(),
+  status: text().notNull(),
+  attempt: integer().notNull().default(1),
+  startedAt: text("started_at"),
+  completedAt: text("completed_at"),
+  durationMs: integer("duration_ms"),
+  error: text(),
+  traceback: text(),
+  runId: integer("run_id").references(() => aiRuns.id, { onDelete: "cascade" }),
+  stepType: text("step_type"),
   result: text(),
   version: integer().notNull().default(1),
   roundNumber: integer("round_number").notNull().default(0),
-  createdAt: text("created_at")
-    .notNull()
-    .default(sql`(datetime('now'))`),
-  completedAt: text("completed_at"),
 });
 
 export const aiMessages = sqliteTable("ai_messages", {
   id: integer().primaryKey({ autoIncrement: true }),
   runId: integer("run_id")
     .notNull()
-    .references(() => aiRuns.id),
+    .references(() => aiRuns.id, { onDelete: "cascade" }),
   role: text({ enum: AI_MESSAGE_ROLES }).notNull(),
   content: text().notNull(),
   roundNumber: integer("round_number").notNull(),
@@ -138,7 +140,7 @@ export const interviewSessions = sqliteTable("interview_sessions", {
   id: integer().primaryKey({ autoIncrement: true }),
   jobId: integer("job_id")
     .notNull()
-    .references(() => jobs.id),
+    .references(() => jobs.id, { onDelete: "cascade" }),
   resumeId: integer("resume_id").references(() => resumes.id),
   status: text({ enum: INTERVIEW_STATUSES }).notNull().default("planning"),
   interviewType: text("interview_type", { enum: INTERVIEW_TYPES }).notNull(),
@@ -157,7 +159,7 @@ export const interviewTurns = sqliteTable("interview_turns", {
   id: integer().primaryKey({ autoIncrement: true }),
   sessionId: integer("session_id")
     .notNull()
-    .references(() => interviewSessions.id),
+    .references(() => interviewSessions.id, { onDelete: "cascade" }),
   turnNumber: integer("turn_number").notNull(),
   role: text({ enum: INTERVIEW_TURN_ROLES }).notNull(),
   text: text().notNull(),
@@ -173,7 +175,7 @@ export const interviewResults = sqliteTable("interview_results", {
   sessionId: integer("session_id")
     .notNull()
     .unique()
-    .references(() => interviewSessions.id),
+    .references(() => interviewSessions.id, { onDelete: "cascade" }),
   overallScore: integer("overall_score").notNull(),
   dimensionScoresJson: text("dimension_scores_json").notNull(),
   strengthsJson: text("strengths_json").notNull(),

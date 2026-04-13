@@ -7,14 +7,10 @@ import logging
 import httpx
 from langchain_core.messages import SystemMessage, HumanMessage
 
-from src.agents.linkedin_db import (
-    create_search, update_search_status, save_company_data, save_contacts, load_search,
-)
+from src.agents.linkedin_db import update_search_status
 from src.agents.linkedin_schemas import (
     JdAnalysis, RelevanceScores, ConnectionNotes, CompanySummary, LeadershipReview,
 )
-from src.agents.linkedin_search import brave_search_profiles, brave_search_domain, SEARCH_DELAY_SECONDS
-from src.db import get_connection
 from src.models.provider import get_linkedin_model
 from src.auth.credentials import load_api_key
 
@@ -29,7 +25,7 @@ NOTE_TARGET_CHARS = 280
 
 # --- Pure / deterministic functions ---
 
-def precondition_check(job: dict) -> dict:
+async def precondition_check(job: dict) -> dict:
     """Determine pipeline mode based on available job data."""
     has_description = bool(job.get("description") and job["description"].strip())
     has_title = bool(job.get("title") and job["title"].strip())
@@ -38,7 +34,7 @@ def precondition_check(job: dict) -> dict:
     return {"mode": "basic", "job": job}
 
 
-def build_search_queries(company: str, analysis: dict | None) -> list[dict]:
+async def build_search_queries(company: str, analysis: dict | None) -> list[dict]:
     """Build search queries using site: operator (works on both Brave and Google).
 
     Note: Brave's site: operator breaks when the company name is double-quoted,
@@ -59,7 +55,7 @@ def build_search_queries(company: str, analysis: dict | None) -> list[dict]:
     return base_queries
 
 
-def merge_and_deduplicate(search_results: dict[str, list[dict]]) -> list[dict]:
+async def merge_and_deduplicate(search_results: dict[str, list[dict]]) -> list[dict]:
     """Merge results from multiple searches, dedup by LinkedIn URL."""
     seen: dict[str, dict] = {}
     for tag, people in search_results.items():
@@ -74,7 +70,7 @@ def merge_and_deduplicate(search_results: dict[str, list[dict]]) -> list[dict]:
     return list(seen.values())
 
 
-def filter_and_rank(people: list[dict]) -> list[dict]:
+async def filter_and_rank(people: list[dict]) -> list[dict]:
     """Filter by relevance threshold, cap at max, handle low-confidence fallback."""
     sorted_people = sorted(people, key=lambda p: p["relevance_score"], reverse=True)
     above_threshold = [p for p in sorted_people if p["relevance_score"] >= RELEVANCE_THRESHOLD]
@@ -91,7 +87,7 @@ def filter_and_rank(people: list[dict]) -> list[dict]:
         return result
 
 
-def truncate_note(note: str) -> str:
+async def truncate_note(note: str) -> str:
     """Truncate a connection note to 300 chars at a word boundary."""
     if len(note) <= NOTE_MAX_CHARS:
         return note.strip()
@@ -105,7 +101,13 @@ def truncate_note(note: str) -> str:
 # --- LLM nodes ---
 
 async def run_analyze_jd(job: dict) -> dict:
-    """Analyze the JD to extract role info. Returns dict matching JdAnalysis fields."""
+    """Analyze the JD. Returns dict matching JdAnalysis fields, including optional domain.
+
+    The LLM is asked to extract both structured role info and the company domain in
+    a single structured call. If the description is blank we short-circuit the domain
+    to None regardless of what the LLM returned, matching the old extract_domain_node
+    behaviour.
+    """
     llm = await get_linkedin_model()
     structured = llm.with_structured_output(JdAnalysis, method="function_calling")
     description = job.get("description") or ""
@@ -114,38 +116,16 @@ async def run_analyze_jd(job: dict) -> dict:
         f"Analyze this job posting and extract structured information.\n\n"
         f"Job title: {title}\n\n"
         f"Job description:\n{description[:3000]}\n\n"
-        "Extract the role title, department domain, seniority level, "
-        "leadership titles one level above this role, and relevant department keywords."
+        "Extract: role title, department domain, seniority level, leadership titles "
+        "one level above this role, relevant department keywords, and the company "
+        "website domain. For the domain, return null unless the description contains "
+        "an explicit URL, email address, or website reference — do not guess."
     )
     result = await structured.ainvoke([HumanMessage(content=prompt)])
-    return result.model_dump()
-
-
-async def run_extract_domain(job: dict) -> str | None:
-    """Try to extract a company domain from the JD text."""
-    description = job.get("description") or ""
+    payload = result.model_dump()
     if not description.strip():
-        return None
-    llm = await get_linkedin_model()
-    prompt = (
-        "Extract the company's website domain from this job description. "
-        "Look for URLs, email addresses, or explicit mentions of the company website. "
-        "Return ONLY the domain (e.g., 'stripe.com') or the word 'none' if no domain is found. "
-        "Do not guess — only return a domain if you find explicit evidence.\n\n"
-        f"Job description:\n{description[:3000]}"
-    )
-    response = await llm.ainvoke([HumanMessage(content=prompt)])
-    raw = response.content
-    if isinstance(raw, list):
-        raw = "".join(block.get("text", "") if isinstance(block, dict) else str(block) for block in raw)
-    text = raw.strip().lower()
-    if text == "none" or len(text) > 100 or " " in text:
-        return None
-    # Clean up common prefixes
-    for prefix in ["http://", "https://", "www."]:
-        if text.startswith(prefix):
-            text = text[len(prefix):]
-    return text.rstrip("/") if "." in text else None
+        payload["domain"] = None
+    return payload
 
 
 async def run_score_relevance(people: list[dict], job: dict, analysis: dict | None) -> list[dict]:
@@ -201,7 +181,7 @@ async def run_generate_notes(people: list[dict], job: dict) -> list[dict]:
     note_map = {n.linkedin_url: n.note for n in result.notes}
     for person in people:
         raw_note = note_map.get(person["linkedin_url"], f"Hi {person['name']}, I'm interested in the {job.get('title', '')} role at {job['company']}.")
-        person["connection_note"] = truncate_note(raw_note)
+        person["connection_note"] = await truncate_note(raw_note)
     return people
 
 
@@ -305,147 +285,29 @@ async def search_domain_google(browser, company: str) -> str | None:
 
 # --- Main pipeline entry point ---
 
-async def run_linkedin_pipeline(search_id: int, job_id: int) -> None:
-    """Run the full linkedin search pipeline. Called as a background asyncio task.
+async def run_linkedin_pipeline(
+    search_id: int, job_id: int, workflow_run_id: str | None = None,
+) -> None:
+    """Thin wrapper around the compiled linkedin_graph.
 
-    Uses Brave Search API when key is configured (no browser needed).
-    Falls back to headed Google via Xvfb if no Brave key, or headless as last resort.
+    The actual 14-step logic lives in linkedin_graph.py as graph nodes.
+    This wrapper exists so the existing call sites (master_workflow
+    resume_branch, linkedin_routes.start_search) don't need to import
+    linkedin_graph directly.
     """
-    async with get_connection() as conn:
-        cursor = await conn.execute(
-            "SELECT id, title, company, description FROM jobs WHERE id = ?", (job_id,)
-        )
-        row = await cursor.fetchone()
+    import uuid
+    from src.agents.linkedin_graph import linkedin_graph
 
-    if not row:
-        await update_search_status(search_id, "failed")
-        return
+    wf_id = workflow_run_id or str(uuid.uuid4())
 
-    job = dict(row)
+    initial_state = {
+        "search_id": search_id,
+        "job_id": job_id,
+        "workflow_run_id": wf_id,
+    }
 
     try:
-        # 1. Precondition check
-        check = precondition_check(job)
-        mode = check["mode"]
-
-        # 2. Analyze JD (if full mode)
-        analysis = None
-        if mode == "full":
-            analysis = await run_analyze_jd(job)
-
-        # 3. Extract domain from JD text
-        domain = None
-        if job.get("description"):
-            domain = await run_extract_domain(job)
-        logger.info("Domain from JD extraction: %s", domain)
-
-        # 4. Check for Brave API key
-        brave_key = await load_api_key("brave")
-
-        # 5. Domain search fallback (if JD extraction found nothing)
-        if not domain and brave_key:
-            domain = await brave_search_domain(job["company"], brave_key)
-            logger.info("Domain from Brave search: %s", domain)
-
-        # 6. Apollo enrichment (if domain found + key configured)
-        company_data = None
-        if domain:
-            company_data = await enrich_company_apollo(domain)
-            logger.info("Apollo enrichment result: %s", "success" if company_data else "no data")
-
-        # 7. Build and run search queries
-        queries = build_search_queries(job["company"], analysis)
-        search_results: dict[str, list[dict]] = {}
-
-        if brave_key:
-            # Brave API path (no browser needed)
-            for q in queries:
-                results = await brave_search_profiles(q["query"], brave_key, 15)
-                search_results[q["tag"]] = results
-                logger.info("Brave search '%s': %d results", q["tag"], len(results))
-                await asyncio.sleep(SEARCH_DELAY_SECONDS)
-        else:
-            # Browser fallback path (Google via Playwright)
-            from playwright.async_api import async_playwright
-            from src.agents.linkedin_search import launch_stealth_browser, run_google_search
-
-            async with async_playwright() as pw:
-                browser, display = await launch_stealth_browser(pw, headless=False)
-                try:
-                    # Domain search via browser if still needed
-                    if not domain:
-                        domain = await search_domain_google(browser, job["company"])
-                        logger.info("Domain from Google search: %s", domain)
-                        await asyncio.sleep(SEARCH_DELAY_SECONDS)
-
-                        # Apollo enrichment with browser-found domain
-                        if domain and not company_data:
-                            company_data = await enrich_company_apollo(domain)
-
-                    # Profile searches via browser
-                    for q in queries:
-                        results = await run_google_search(browser, q["query"])
-                        search_results[q["tag"]] = results
-                        logger.info("Google search '%s': %d results", q["tag"], len(results))
-                        await asyncio.sleep(SEARCH_DELAY_SECONDS)
-                finally:
-                    await browser.close()
-                    if display:
-                        display.stop()
-
-        # 8. Review leadership results (if applicable)
-        if "leadership" in search_results and analysis and search_results["leadership"]:
-            review = await run_review_leadership(search_results["leadership"], analysis["role_domain"])
-            if review.needs_retry and review.refined_query:
-                retry_query = f'site:linkedin.com/in "{review.refined_query}" {job["company"]}'
-                if brave_key:
-                    retry_results = await brave_search_profiles(retry_query, brave_key)
-                else:
-                    logger.warning("Leadership retry skipped — no Brave key, browser already closed")
-                    retry_results = []
-                if retry_results:
-                    search_results["leadership"] = retry_results
-                await asyncio.sleep(SEARCH_DELAY_SECONDS)
-
-        # 9. Merge and deduplicate
-        total_raw = sum(len(v) for v in search_results.values())
-        merged = merge_and_deduplicate(search_results)
-        logger.info("Merged contacts: %d (from %d raw results across %d queries)", len(merged), total_raw, len(queries))
-        if not merged:
-            logger.warning(
-                "No LinkedIn profiles found for '%s' — company may be too small or obscure for web search",
-                job["company"],
-            )
-
-        # 10. Score relevance
-        if merged:
-            merged = await run_score_relevance(merged, job, analysis)
-
-        # 11. Filter and rank
-        ranked = filter_and_rank(merged)
-
-        # 12. Generate connection notes
-        if ranked:
-            ranked = await run_generate_notes(ranked, job)
-
-        # 13. Compile company summary
-        summary = None
-        if company_data:
-            summary = await run_compile_summary(company_data, job)
-
-        # 14. Save results
-        if company_data or domain:
-            await save_company_data(
-                search_id,
-                domain=domain or "",
-                data_json=json.dumps(company_data) if company_data else "{}",
-                summary=summary or "",
-            )
-
-        await save_contacts(search_id, ranked)
-        logger.info("LinkedIn search %s completed: %d contacts saved", search_id, len(ranked))
-        await update_search_status(search_id, "completed")
-
+        await linkedin_graph.ainvoke(initial_state)
     except Exception as exc:
         logger.exception("LinkedIn pipeline failed for search %s: %s", search_id, exc)
         await update_search_status(search_id, "failed")

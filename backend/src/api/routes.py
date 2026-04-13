@@ -1,6 +1,7 @@
 import asyncio
 import json as _json
 import logging
+import uuid
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -103,6 +104,8 @@ async def create_run(req: CreateRunRequest):
         run_id = cursor.lastrowid
         await conn.commit()
 
+    workflow_run_id = str(uuid.uuid4())
+
     async def _background():
         try:
             await run_pipeline(
@@ -112,6 +115,7 @@ async def create_run(req: CreateRunRequest):
                 jd_text=job["description"],
                 resume_text=resume["extracted_text"],
                 round_number=0,
+                workflow_run_id=workflow_run_id,
             )
         except Exception as exc:
             logger.exception("Pipeline failed: %s", exc)
@@ -126,8 +130,9 @@ async def create_run(req: CreateRunRequest):
 async def _extract_match_score(conn, run_id: int) -> int | None:
     """Return overall_match_score from the latest completed gap_analysis step."""
     cursor = await conn.execute(
-        "SELECT result FROM ai_steps "
+        "SELECT result FROM pipeline_events "
         "WHERE run_id = ? AND step_type = 'gap_analysis' AND status = 'completed' "
+        "AND graph = 'resume' "
         "ORDER BY version DESC LIMIT 1",
         (run_id,),
     )
@@ -178,7 +183,10 @@ async def get_run(run_id: int):
             raise HTTPException(status_code=404, detail="Run not found")
 
         cursor = await conn.execute(
-            "SELECT * FROM ai_steps WHERE run_id = ? ORDER BY id", (run_id,)
+            "SELECT id, run_id, step_type, status, result, version, round_number, "
+            "started_at AS created_at, completed_at FROM pipeline_events "
+            "WHERE run_id = ? AND graph = 'resume' ORDER BY id",
+            (run_id,),
         )
         steps = await cursor.fetchall()
 
@@ -226,11 +234,14 @@ async def send_message(run_id: int, req: SendMessageRequest):
     resume_text_val = resume["extracted_text"]
     user_content = req.content
 
+    workflow_run_id = str(uuid.uuid4())
+
     async def _background():
         await _classify_and_run_pipeline(
             run_id, job_id_val, resume_id_val,
             jd_text_val, resume_text_val,
             user_content, round_num,
+            workflow_run_id=workflow_run_id,
         )
 
     task = asyncio.create_task(_background())
@@ -242,7 +253,7 @@ async def send_message(run_id: int, req: SendMessageRequest):
 
 async def _classify_and_run_pipeline(
     run_id, job_id, resume_id, jd_text, resume_text,
-    user_content, round_num,
+    user_content, round_num, workflow_run_id: str,
 ):
     """Classify the follow-up, save the ack, then run the pipeline."""
     summary = await get_conversation_summary(run_id)
@@ -265,7 +276,9 @@ async def _classify_and_run_pipeline(
 
     async with get_connection() as conn:
         cursor = await conn.execute(
-            "SELECT step_type, result FROM ai_steps WHERE run_id = ? AND status = 'completed' ORDER BY version DESC",
+            "SELECT step_type, result FROM pipeline_events "
+            "WHERE run_id = ? AND status = 'completed' AND graph = 'resume' "
+            "ORDER BY version DESC",
             (run_id,),
         )
         steps = await cursor.fetchall()
@@ -283,6 +296,7 @@ async def _classify_and_run_pipeline(
             jd_text=jd_text,
             resume_text=resume_text,
             round_number=round_num,
+            workflow_run_id=workflow_run_id,
             previous_state=previous_state,
             conversation_summary=summary,
             recent_messages=recent,
@@ -356,6 +370,8 @@ async def retry_run(run_id: int):
     if not resume:
         raise HTTPException(status_code=404, detail="Resume not found")
 
+    workflow_run_id = str(uuid.uuid4())
+
     async def _background():
         try:
             await run_pipeline(
@@ -365,6 +381,7 @@ async def retry_run(run_id: int):
                 jd_text=job["description"],
                 resume_text=resume["extracted_text"],
                 round_number=0,
+                workflow_run_id=workflow_run_id,
             )
         except Exception as exc:
             logger.exception("Pipeline failed: %s", exc)
@@ -388,7 +405,10 @@ async def delete_run(run_id: int):
         if run["status"] == "running":
             raise HTTPException(status_code=409, detail="run_in_progress")
         await conn.execute("DELETE FROM ai_messages WHERE run_id = ?", (run_id,))
-        await conn.execute("DELETE FROM ai_steps WHERE run_id = ?", (run_id,))
+        await conn.execute(
+            "DELETE FROM pipeline_events WHERE run_id = ? AND graph = 'resume'",
+            (run_id,),
+        )
         await conn.execute("DELETE FROM ai_runs WHERE id = ?", (run_id,))
         await conn.commit()
     return None

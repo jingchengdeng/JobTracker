@@ -45,7 +45,11 @@ VALID_PAYLOAD = {
     "timestamp": "2026-04-08T12-34-56",
 }
 
-_NOOP_PIPELINE = {"job_id": None, "error": None}
+_NOOP_PIPELINE = {"job_id": None, "error": None, "extracted": None}
+
+
+async def _mock_run_extraction_pipeline(raw_text, url, workflow_run_id=None):
+    return _NOOP_PIPELINE
 
 
 @patch("src.api.extension_routes.run_extraction_pipeline", new_callable=AsyncMock, return_value=_NOOP_PIPELINE)
@@ -196,3 +200,23 @@ class TestExtractEndpoint:
             data = resp.json()
             assert "duplicate" not in data
             mock_pipeline.assert_called_once()
+
+
+def test_extract_response_contains_workflow_run_id(client, monkeypatch):
+    """The /api/extension/extract response must include workflow_run_id
+    so the Pipeline tab can subscribe to the stream."""
+    from unittest.mock import patch
+
+    async def noop_pipeline(*args, **kwargs):
+        return {"job_id": 1, "error": None, "extracted": {"description": "D"}}
+
+    with patch("src.api.extension_routes.run_extraction_pipeline", new=noop_pipeline):
+        resp = client.post("/api/extension/extract", json={
+            "url": "https://linkedin.com/jobs/view/99",
+            "extracted": {"title": "Engineer"},
+            "rawPanelText": "raw",
+            "timestamp": "2026-04-10T00:00:00Z",
+        })
+    data = resp.json()
+    assert "workflow_run_id" in data
+    assert len(data["workflow_run_id"]) > 0

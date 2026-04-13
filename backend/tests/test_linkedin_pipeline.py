@@ -4,27 +4,27 @@ from unittest.mock import patch, MagicMock, AsyncMock
 
 
 class TestPreconditionCheck:
-    def test_full_pipeline_when_description_exists(self):
+    async def test_full_pipeline_when_description_exists(self):
         from src.agents.linkedin_pipeline import precondition_check
         job = {"title": "SWE", "company": "Stripe", "description": "Build payment APIs..."}
-        result = precondition_check(job)
+        result = await precondition_check(job)
         assert result["mode"] == "full"
 
-    def test_full_pipeline_when_only_title_exists(self):
+    async def test_full_pipeline_when_only_title_exists(self):
         from src.agents.linkedin_pipeline import precondition_check
         job = {"title": "Senior Engineer", "company": "Stripe", "description": None}
-        result = precondition_check(job)
+        result = await precondition_check(job)
         assert result["mode"] == "full"
 
-    def test_basic_pipeline_when_only_company(self):
+    async def test_basic_pipeline_when_only_company(self):
         from src.agents.linkedin_pipeline import precondition_check
         job = {"title": "", "company": "Stripe", "description": None}
-        result = precondition_check(job)
+        result = await precondition_check(job)
         assert result["mode"] == "basic"
 
 
 class TestBuildSearchQueries:
-    def test_full_mode_generates_five_queries(self):
+    async def test_full_mode_generates_five_queries(self):
         from src.agents.linkedin_pipeline import build_search_queries
         analysis = {
             "role_title": "Senior Software Engineer",
@@ -33,23 +33,23 @@ class TestBuildSearchQueries:
             "leadership_titles": ["Engineering Manager", "Director of Engineering"],
             "department_keywords": ["backend"],
         }
-        queries = build_search_queries("Stripe", analysis)
+        queries = await build_search_queries("Stripe", analysis)
         assert len(queries) == 5
         assert all("site:linkedin.com/in" in q["query"] for q in queries)
         assert any("recruiter" in q["query"].lower() for q in queries)
         assert any('"talent acquisition"' in q["query"].lower() for q in queries)
         assert any('"Engineering Manager"' in q["query"] for q in queries)
 
-    def test_basic_mode_generates_four_queries(self):
+    async def test_basic_mode_generates_four_queries(self):
         from src.agents.linkedin_pipeline import build_search_queries
-        queries = build_search_queries("Stripe", None)
+        queries = await build_search_queries("Stripe", None)
         assert len(queries) == 4
         assert all("site:linkedin.com/in" in q["query"] for q in queries)
         assert all(q["tag"] in ("recruiter", "ta", "hiring_mgr", "hr") for q in queries)
 
 
 class TestMergeAndDeduplicate:
-    def test_deduplicates_by_url(self):
+    async def test_deduplicates_by_url(self):
         from src.agents.linkedin_pipeline import merge_and_deduplicate
         results = {
             "recruiter": [
@@ -59,12 +59,12 @@ class TestMergeAndDeduplicate:
                 {"name": "Amy", "title": "Talent Acquisition", "location": "Miami", "linkedin_url": "https://www.linkedin.com/in/amy"},
             ],
         }
-        merged = merge_and_deduplicate(results)
+        merged = await merge_and_deduplicate(results)
         assert len(merged) == 1
         assert "recruiter" in merged[0]["source_query"]
         assert "ta" in merged[0]["source_query"]
 
-    def test_keeps_unique_entries(self):
+    async def test_keeps_unique_entries(self):
         from src.agents.linkedin_pipeline import merge_and_deduplicate
         results = {
             "recruiter": [
@@ -74,24 +74,24 @@ class TestMergeAndDeduplicate:
                 {"name": "Bob", "title": "HR", "location": None, "linkedin_url": "https://www.linkedin.com/in/bob"},
             ],
         }
-        merged = merge_and_deduplicate(results)
+        merged = await merge_and_deduplicate(results)
         assert len(merged) == 2
 
 
 class TestFilterAndRank:
-    def test_filters_below_threshold(self):
+    async def test_filters_below_threshold(self):
         from src.agents.linkedin_pipeline import filter_and_rank
         people = [
             {"linkedin_url": "a", "relevance_score": 80},
             {"linkedin_url": "b", "relevance_score": 30},
             {"linkedin_url": "c", "relevance_score": 60},
         ]
-        filtered = filter_and_rank(people)
+        filtered = await filter_and_rank(people)
         assert len(filtered) == 2
         assert filtered[0]["relevance_score"] == 80
         assert all(p.get("low_confidence") == 0 for p in filtered)
 
-    def test_returns_top3_with_low_confidence_when_all_below_threshold(self):
+    async def test_returns_top3_with_low_confidence_when_all_below_threshold(self):
         from src.agents.linkedin_pipeline import filter_and_rank
         people = [
             {"linkedin_url": "a", "relevance_score": 30},
@@ -99,130 +99,126 @@ class TestFilterAndRank:
             {"linkedin_url": "c", "relevance_score": 35},
             {"linkedin_url": "d", "relevance_score": 10},
         ]
-        filtered = filter_and_rank(people)
+        filtered = await filter_and_rank(people)
         assert len(filtered) == 3
         assert filtered[0]["relevance_score"] == 35
         assert all(p["low_confidence"] == 1 for p in filtered)
 
-    def test_caps_at_ten(self):
+    async def test_caps_at_ten(self):
         from src.agents.linkedin_pipeline import filter_and_rank
         people = [{"linkedin_url": str(i), "relevance_score": 50 + i} for i in range(15)]
-        filtered = filter_and_rank(people)
+        filtered = await filter_and_rank(people)
         assert len(filtered) == 10
 
 
 class TestTruncateNote:
-    def test_short_note_unchanged(self):
+    async def test_short_note_unchanged(self):
         from src.agents.linkedin_pipeline import truncate_note
-        assert truncate_note("Hi Amy, great to connect!") == "Hi Amy, great to connect!"
+        assert await truncate_note("Hi Amy, great to connect!") == "Hi Amy, great to connect!"
 
-    def test_long_note_truncated_at_word_boundary(self):
+    async def test_long_note_truncated_at_word_boundary(self):
         from src.agents.linkedin_pipeline import truncate_note
         long_note = "word " * 100  # 500 chars
-        result = truncate_note(long_note)
+        result = await truncate_note(long_note)
         assert len(result) <= 300
         assert not result.endswith(" ")
 
-    def test_exactly_300_chars_unchanged(self):
+    async def test_exactly_300_chars_unchanged(self):
         from src.agents.linkedin_pipeline import truncate_note
         note = "x" * 300
-        assert len(truncate_note(note)) == 300
+        assert len(await truncate_note(note)) == 300
 
 
 class TestRunLinkedinPipelineIntegration:
-    """Integration test: full pipeline with mocked LLM, Brave, and Apollo."""
+    """Integration test: run_linkedin_pipeline delegates to linkedin_graph.ainvoke."""
 
-    @pytest.fixture
-    def db_path(self, tmp_path, monkeypatch):
-        import sqlite3
-        path = str(tmp_path / "test.db")
-        monkeypatch.setenv("JOBTRACKER_DB_PATH", path)
-        conn = sqlite3.connect(path)
-        conn.execute("CREATE TABLE jobs (id INTEGER PRIMARY KEY, title TEXT, company TEXT, description TEXT)")
-        conn.execute("INSERT INTO jobs (id, title, company, description) VALUES (1, 'SWE', 'Stripe', 'Build payment APIs at stripe.com. Looking for senior engineers.')")
-        conn.commit()
-        conn.close()
-        from src.agents.linkedin_db import ensure_linkedin_tables
-        ensure_linkedin_tables(path)
-        return path
-
-    @patch("src.agents.linkedin_pipeline.get_linkedin_model")
-    @patch("src.agents.linkedin_pipeline.enrich_company_apollo", new_callable=AsyncMock)
-    @patch("src.agents.linkedin_pipeline.brave_search_profiles")
-    @patch("src.agents.linkedin_pipeline.brave_search_domain")
-    @patch("src.agents.linkedin_pipeline.load_api_key")
+    @patch("src.agents.linkedin_graph.linkedin_graph")
     @pytest.mark.asyncio
-    async def test_full_pipeline_completes(
-        self, mock_load_key, mock_domain_search, mock_brave_search, mock_apollo, mock_model, db_path
-    ):
-        from src.agents.linkedin_db import load_search, load_contacts, create_search
+    async def test_full_pipeline_completes(self, mock_graph):
         from src.agents.linkedin_pipeline import run_linkedin_pipeline
 
-        # Mock API key lookup — return Brave key, None for others
-        mock_load_key.side_effect = lambda provider: "fake-brave-key" if provider == "brave" else None
+        mock_graph.ainvoke = AsyncMock(return_value={})
 
-        # Mock LLM
+        await run_linkedin_pipeline(search_id=42, job_id=1, workflow_run_id="test-wf-id")
+
+        mock_graph.ainvoke.assert_called_once()
+        call_args = mock_graph.ainvoke.call_args[0][0]
+        assert call_args["search_id"] == 42
+        assert call_args["job_id"] == 1
+        assert call_args["workflow_run_id"] == "test-wf-id"
+
+    @patch("src.agents.linkedin_graph.linkedin_graph")
+    @pytest.mark.asyncio
+    async def test_generates_workflow_run_id_when_none(self, mock_graph):
+        from src.agents.linkedin_pipeline import run_linkedin_pipeline
+
+        mock_graph.ainvoke = AsyncMock(return_value={})
+
+        await run_linkedin_pipeline(search_id=7, job_id=2)
+
+        call_args = mock_graph.ainvoke.call_args[0][0]
+        assert call_args["workflow_run_id"] is not None
+        assert len(call_args["workflow_run_id"]) == 36  # UUID format
+
+
+class TestRunAnalyzeJdWithDomain:
+    @pytest.mark.asyncio
+    async def test_returns_domain_when_llm_finds_one(self):
+        from src.agents import linkedin_pipeline
+        from src.agents.linkedin_schemas import JdAnalysis
+
+        fake = JdAnalysis(
+            role_title="SWE", role_domain="engineering", seniority="senior",
+            leadership_titles=["Engineering Manager"], department_keywords=["backend"],
+            domain="stripe.com",
+        )
         mock_llm = MagicMock()
-        mock_model.return_value = mock_llm
+        mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(return_value=fake)
 
-        mock_analysis = MagicMock()
-        mock_analysis.model_dump.return_value = {
-            "role_title": "Senior Software Engineer",
-            "role_domain": "engineering",
-            "seniority": "senior",
-            "leadership_titles": ["Engineering Manager"],
-            "department_keywords": ["backend"],
-        }
-        mock_domain_response = MagicMock()
-        mock_domain_response.content = "stripe.com"
+        with patch.object(linkedin_pipeline, "get_linkedin_model", AsyncMock(return_value=mock_llm)):
+            result = await linkedin_pipeline.run_analyze_jd(
+                {"title": "SWE", "description": "Visit stripe.com/jobs"}
+            )
+        assert result["domain"] == "stripe.com"
 
-        mock_scores = MagicMock()
-        mock_scores.scores = [
-            MagicMock(linkedin_url="https://www.linkedin.com/in/amy", score=85, reason="Recruiter"),
-        ]
+    @pytest.mark.asyncio
+    async def test_nullifies_domain_when_description_empty(self):
+        from src.agents import linkedin_pipeline
+        from src.agents.linkedin_schemas import JdAnalysis
 
-        mock_notes = MagicMock()
-        mock_notes.notes = [
-            MagicMock(linkedin_url="https://www.linkedin.com/in/amy", note="Hi Amy, I am applying for SWE at Stripe."),
-        ]
+        fake = JdAnalysis(
+            role_title="SWE", role_domain="engineering", seniority="senior",
+            leadership_titles=[], department_keywords=[], domain="made-up.com",
+        )
+        mock_llm = MagicMock()
+        mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(return_value=fake)
 
-        mock_summary = MagicMock()
-        mock_summary.summary = "Stripe is a fintech company."
+        with patch.object(linkedin_pipeline, "get_linkedin_model", AsyncMock(return_value=mock_llm)):
+            result = await linkedin_pipeline.run_analyze_jd({"title": "SWE", "description": ""})
+        assert result["domain"] is None
 
-        mock_review = MagicMock()
-        mock_review.needs_retry = False
-        mock_review.relevant_count = 1
-        mock_review.total_count = 1
-        mock_review.refined_query = None
 
-        structured_mock = MagicMock()
-        call_count = {"n": 0}
-        returns = [mock_analysis, mock_review, mock_scores, mock_notes, mock_summary]
+class TestAnalyzeJdNodePropagatesDomain:
+    @pytest.mark.asyncio
+    async def test_writes_domain_to_state(self):
+        from src.agents import linkedin_graph
+        from src.agents import linkedin_pipeline
+        from src.agents.linkedin_schemas import JdAnalysis
 
-        async def ainvoke_side_effect(messages):
-            idx = call_count["n"]
-            call_count["n"] += 1
-            if idx < len(returns):
-                return returns[idx]
-            return returns[-1]
+        fake = JdAnalysis(
+            role_title="SWE", role_domain="engineering", seniority="senior",
+            leadership_titles=[], department_keywords=[], domain="stripe.com",
+        )
+        mock_llm = MagicMock()
+        mock_llm.with_structured_output.return_value.ainvoke = AsyncMock(return_value=fake)
 
-        structured_mock.ainvoke = ainvoke_side_effect
-        mock_llm.with_structured_output.return_value = structured_mock
+        with patch.object(linkedin_pipeline, "get_linkedin_model", AsyncMock(return_value=mock_llm)):
+            result = await linkedin_graph.analyze_jd_node({
+                "workflow_run_id": "test-wf",
+                "job_id": 1,
+                "job": {"title": "SWE", "description": "Visit stripe.com/jobs"},
+            })
 
-        mock_domain_async = AsyncMock(return_value=mock_domain_response)
-        mock_llm.ainvoke = mock_domain_async
-
-        mock_apollo.return_value = {"name": "Stripe", "estimated_num_employees": 8000}
-
-        mock_brave_search.return_value = [
-            {"name": "Amy Salazar", "title": "Recruiter", "location": "Miami", "linkedin_url": "https://www.linkedin.com/in/amy"},
-        ]
-        mock_domain_search.return_value = None
-
-        search_id = await create_search(job_id=1)
-        await run_linkedin_pipeline(search_id, 1)
-
-        search = await load_search(search_id)
-        assert search["status"] == "completed"
-        contacts = await load_contacts(search_id)
-        assert len(contacts) >= 1
+        assert result["domain"] == "stripe.com"
+        assert result["analysis"]["role_title"] == "SWE"
+        assert "domain" not in result["analysis"]  # popped out, not duplicated

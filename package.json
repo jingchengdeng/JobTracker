@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "concurrently \"next dev --turbopack\" \"cd backend && uv run uvicorn src.main:app --reload --port 8000\" \"cd backend && uv run chroma run --path ../data/vectordb --port 8200\"",
+    "dev": "bash scripts/dev-preflight.sh && concurrently \"next dev --turbopack\" \"cd backend && uv run uvicorn src.main:app --reload --port 8000\" \"cd backend && uv run chroma run --path ../data/vectordb --port 8200\"",
+    "dev:stop": "bash scripts/dev-stop.sh",
     "dev:web": "next dev --turbopack",
     "dev:backend": "cd backend && uv run uvicorn src.main:app --reload --port 8000",
     "build": "next build",
@@ -14,8 +15,10 @@
   },
   "dependencies": {
     "@base-ui/react": "^1.3.0",
+    "@dagrejs/dagre": "^1.1.8",
     "@libsql/client": "^0.17.2",
     "@mariozechner/pi-ai": "^0.65.0",
+    "@xyflow/react": "^12.10.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",

@@ -145,13 +145,10 @@ class TestParseSearchResults:
 
 
 def _make_async_client_mock(mock_response):
-    """Build an AsyncClient context-manager mock that returns mock_response on .get()."""
+    """Build an AsyncClient mock that returns mock_response on .get()."""
     mock_client = AsyncMock()
     mock_client.get.return_value = mock_response
-    mock_client_instance = MagicMock()
-    mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client)
-    mock_client_instance.__aexit__ = AsyncMock(return_value=False)
-    return mock_client_instance
+    return mock_client
 
 
 class TestBraveSearchProfiles:
@@ -238,10 +235,7 @@ class TestBraveSearchProfiles:
     async def test_returns_empty_on_api_error(self, mock_client_cls):
         mock_client = AsyncMock()
         mock_client.get.side_effect = Exception("timeout")
-        mock_client_instance = MagicMock()
-        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client_instance.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client_instance
+        mock_client_cls.return_value = mock_client
 
         results = await brave_search_profiles("query", "fake-key")
         assert results == []
@@ -299,9 +293,17 @@ class TestBraveSearchDomain:
     async def test_returns_none_on_error(self, mock_client_cls):
         mock_client = AsyncMock()
         mock_client.get.side_effect = Exception("timeout")
-        mock_client_instance = MagicMock()
-        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client_instance.__aexit__ = AsyncMock(return_value=False)
-        mock_client_cls.return_value = mock_client_instance
+        mock_client_cls.return_value = mock_client
 
         assert await brave_search_domain("Deloitte", "fake-key") is None
+
+
+class TestBraveSharedClient:
+    @pytest.mark.asyncio
+    async def test_brave_client_is_singleton(self):
+        from src.agents import linkedin_search
+        # Reset the cached client between tests
+        linkedin_search._brave_client_instance = None
+        c1 = await linkedin_search._brave_client()
+        c2 = await linkedin_search._brave_client()
+        assert c1 is c2

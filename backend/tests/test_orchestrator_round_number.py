@@ -1,5 +1,5 @@
 import sqlite3
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -15,11 +15,23 @@ def test_db(tmp_path, monkeypatch):
             status TEXT DEFAULT 'pending', error TEXT,
             created_at TEXT DEFAULT (datetime('now')), completed_at TEXT
         );
-        CREATE TABLE ai_steps (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER, step_type TEXT,
-            status TEXT DEFAULT 'pending', result TEXT,
-            version INTEGER DEFAULT 1, round_number INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT DEFAULT (datetime('now')), completed_at TEXT
+        CREATE TABLE pipeline_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            workflow_run_id TEXT,
+            job_id INTEGER,
+            graph TEXT,
+            node_name TEXT,
+            step_type TEXT,
+            status TEXT DEFAULT 'running',
+            attempt INTEGER DEFAULT 1,
+            version INTEGER DEFAULT 1,
+            round_number INTEGER NOT NULL DEFAULT 0,
+            run_id INTEGER,
+            error TEXT,
+            traceback TEXT,
+            started_at TEXT DEFAULT (datetime('now')),
+            completed_at TEXT,
+            duration_ms INTEGER
         );
         INSERT INTO ai_runs (id, job_id, resume_id, status) VALUES (1, 1, 1, 'running');
         """
@@ -30,26 +42,42 @@ def test_db(tmp_path, monkeypatch):
     return db_path
 
 
-async def test_update_step_status_stamps_round_number(test_db):
-    from src.agents.orchestrator import _update_step_status
-    await _update_step_status(1, "jd_analysis", "running", round_number=2)
+async def test_pipeline_events_stamps_round_number(test_db):
+    """Inserting a pipeline_events row with round_number stores it correctly."""
     conn = sqlite3.connect(test_db)
+    conn.execute(
+        "INSERT INTO pipeline_events "
+        "(workflow_run_id, run_id, step_type, graph, node_name, status, version, round_number) "
+        "VALUES ('test-run', 1, 'jd_analysis', 'resume', 'jd_analysis', 'running', 1, 2)"
+    )
+    conn.commit()
     row = conn.execute(
-        "SELECT status, round_number FROM ai_steps WHERE run_id = 1 AND step_type = 'jd_analysis'"
+        "SELECT status, round_number FROM pipeline_events "
+        "WHERE run_id = 1 AND graph = 'resume' AND step_type = 'jd_analysis'"
     ).fetchone()
     conn.close()
     assert row == ("running", 2)
 
 
-async def test_update_step_status_stamps_round_on_new_version(test_db):
-    from src.agents.orchestrator import _update_step_status
-    await _update_step_status(1, "jd_analysis", "running", round_number=0)
-    await _update_step_status(1, "jd_analysis", "completed", result="r1", round_number=0)
-    await _update_step_status(1, "jd_analysis", "running", round_number=1)
+async def test_pipeline_events_stamps_round_on_new_version(test_db):
+    """A second run of the same step inserts a new version row with the new round_number."""
     conn = sqlite3.connect(test_db)
+    # First run: version=1, round_number=0
+    conn.execute(
+        "INSERT INTO pipeline_events "
+        "(workflow_run_id, run_id, step_type, graph, node_name, status, version, round_number) "
+        "VALUES ('test-run', 1, 'jd_analysis', 'resume', 'jd_analysis', 'completed', 1, 0)"
+    )
+    # Second run: version=2, round_number=1
+    conn.execute(
+        "INSERT INTO pipeline_events "
+        "(workflow_run_id, run_id, step_type, graph, node_name, status, version, round_number) "
+        "VALUES ('test-run', 1, 'jd_analysis', 'resume', 'jd_analysis', 'running', 2, 1)"
+    )
+    conn.commit()
     rows = conn.execute(
-        "SELECT version, round_number, status FROM ai_steps "
-        "WHERE run_id = 1 AND step_type = 'jd_analysis' ORDER BY version"
+        "SELECT version, round_number, status FROM pipeline_events "
+        "WHERE run_id = 1 AND graph = 'resume' AND step_type = 'jd_analysis' ORDER BY version"
     ).fetchall()
     conn.close()
     assert rows == [(1, 0, "completed"), (2, 1, "running")]
@@ -81,3 +109,4 @@ async def test_run_pipeline_accepts_explicit_booleans(test_db):
     assert state["needs_gap_analysis"] is True
     assert state["needs_suggestions"] is False
     assert state["needs_rewrite"] is True
+    assert "workflow_run_id" in state

@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 
 const BACKEND_URL = process.env.AI_BACKEND_URL || "http://localhost:8000";
 
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
 async function proxyRequest(request: NextRequest) {
   const path = request.nextUrl.pathname.replace(/^\/api\/ai/, "/api");
   const url = `${BACKEND_URL}${path}${request.nextUrl.search}`;
@@ -19,11 +22,23 @@ async function proxyRequest(request: NextRequest) {
   }
 
   const res = await fetch(url, init);
-  const body = await res.text();
+  const contentType = res.headers.get("content-type") || "application/json";
 
+  if (contentType.startsWith("text/event-stream")) {
+    return new Response(res.body, {
+      status: res.status,
+      headers: {
+        "content-type": "text/event-stream",
+        "cache-control": "no-cache",
+        "connection": "keep-alive",
+      },
+    });
+  }
+
+  const body = await res.text();
   return new NextResponse(body, {
     status: res.status,
-    headers: { "content-type": res.headers.get("content-type") || "application/json" },
+    headers: { "content-type": contentType },
   });
 }
 

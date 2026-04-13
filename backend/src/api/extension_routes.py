@@ -2,6 +2,7 @@ import asyncio
 import os
 import re
 import logging
+import uuid
 from pathlib import Path
 
 import aiofiles
@@ -103,6 +104,8 @@ async def extract(req: ExtractRequest):
 
     logger.info("Saved extraction to %s", filepath)
 
+    workflow_run_id = str(uuid.uuid4())
+
     # Check for duplicate by URL
     if req.url and req.url.strip():
         try:
@@ -129,7 +132,9 @@ async def extract(req: ExtractRequest):
     extraction_error = None
     pipeline_result = {}
     try:
-        pipeline_result = await run_extraction_pipeline(req.rawPanelText, req.url)
+        pipeline_result = await run_extraction_pipeline(
+            req.rawPanelText, req.url, workflow_run_id=workflow_run_id,
+        )
         job_id = pipeline_result.get("job_id")
         extraction_error = pipeline_result.get("error")
         if extraction_error:
@@ -142,18 +147,22 @@ async def extract(req: ExtractRequest):
     if job_id and not extraction_error:
         async def _fan_out_background():
             try:
-                resume_state = await resolve_default_resume({"job_id": job_id})
+                resume_state = await resolve_default_resume({
+                    "job_id": job_id,
+                    "workflow_run_id": workflow_run_id,
+                })
 
                 extracted = pipeline_result.get("extracted") or {}
 
                 full_state = {
                     "job_id": job_id,
+                    "workflow_run_id": workflow_run_id,
                     "extracted": {"description": extracted.get("description")} if extracted else None,
                     "default_resume_id": resume_state.get("default_resume_id"),
                     "default_resume_text": resume_state.get("default_resume_text"),
                     "default_resume_name": resume_state.get("default_resume_name"),
                 }
-                sends = fan_out(full_state)
+                sends = await fan_out(full_state)
 
                 tasks = []
                 for send in sends:
@@ -170,7 +179,12 @@ async def extract(req: ExtractRequest):
         _background_tasks.add(task)
         task.add_done_callback(_background_tasks.discard)
 
-    result = {"success": True, "filename": filename, "job_id": job_id}
+    result = {
+        "success": True,
+        "filename": filename,
+        "job_id": job_id,
+        "workflow_run_id": workflow_run_id,
+    }
     if extraction_error:
         result["extraction_error"] = extraction_error
     return result

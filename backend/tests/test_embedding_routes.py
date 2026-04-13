@@ -30,7 +30,10 @@ def test_db(tmp_path, monkeypatch):
         "CREATE TABLE IF NOT EXISTS ai_runs (id INTEGER PRIMARY KEY, status TEXT, error TEXT)"
     )
     conn.execute(
-        "CREATE TABLE IF NOT EXISTS ai_steps (id INTEGER PRIMARY KEY, round_number INTEGER DEFAULT 0)"
+        "CREATE TABLE IF NOT EXISTS pipeline_events ("
+        "id INTEGER PRIMARY KEY, workflow_run_id TEXT, graph TEXT, node_name TEXT, "
+        "status TEXT, attempt INTEGER DEFAULT 1, version INTEGER DEFAULT 1, "
+        "round_number INTEGER DEFAULT 0, error TEXT, completed_at TEXT)"
     )
     conn.execute(
         "CREATE TABLE IF NOT EXISTS interview_sessions (id INTEGER PRIMARY KEY, status TEXT, "

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, dbReady } from "@/db";
-import { resumes, aiRuns, aiSteps, aiMessages } from "@/db/schema";
-import { eq, inArray } from "drizzle-orm";
+import { resumes, aiRuns, pipelineEvents, aiMessages } from "@/db/schema";
+import { eq, inArray, and } from "drizzle-orm";
 import fs from "fs/promises";
 import path from "path";
 
@@ -56,7 +56,9 @@ export async function DELETE(
 
     if (runIds.length > 0) {
       await tx.delete(aiMessages).where(inArray(aiMessages.runId, runIds));
-      await tx.delete(aiSteps).where(inArray(aiSteps.runId, runIds));
+      await tx.delete(pipelineEvents).where(
+        and(inArray(pipelineEvents.runId, runIds), eq(pipelineEvents.graph, "resume")),
+      );
       await tx.delete(aiRuns).where(inArray(aiRuns.id, runIds));
     }
 
