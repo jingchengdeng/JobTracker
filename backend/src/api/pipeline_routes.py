@@ -26,9 +26,15 @@ async def _fetch_snapshot(job_id: int) -> dict:
     """Return {active_runs: {...}, nodes: [...]} for the given job."""
     async with get_connection() as conn:
         cursor = await conn.execute(
+            # Resolve the active run per graph by MAX(id), not MAX(started_at).
+            # SQLite's datetime('now') has 1-second resolution, so two
+            # back-to-back runs can share the exact same started_at and a
+            # timestamp-equality join would pull rows from both into the same
+            # snapshot. The auto-increment id is monotonic and unique, so it's
+            # a deterministic tie-break that also survives NULL started_at.
             """
             WITH latest_per_graph AS (
-                SELECT graph, MAX(started_at) AS latest_ts
+                SELECT graph, MAX(id) AS latest_id
                   FROM pipeline_events
                  WHERE job_id = ?
               GROUP BY graph
@@ -37,8 +43,7 @@ async def _fetch_snapshot(job_id: int) -> dict:
                 SELECT DISTINCT pe.graph, pe.workflow_run_id
                   FROM pipeline_events pe
                   JOIN latest_per_graph lpg
-                    ON pe.graph = lpg.graph AND pe.started_at = lpg.latest_ts
-                 WHERE pe.job_id = ?
+                    ON pe.graph = lpg.graph AND pe.id = lpg.latest_id
             )
             SELECT pe.*
               FROM pipeline_events pe
@@ -47,7 +52,7 @@ async def _fetch_snapshot(job_id: int) -> dict:
              WHERE pe.job_id = ?
           ORDER BY pe.id
             """,
-            (job_id, job_id, job_id),
+            (job_id, job_id),
         )
         rows = [dict(r) for r in await cursor.fetchall()]
 

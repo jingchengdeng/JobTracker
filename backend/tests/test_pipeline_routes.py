@@ -96,6 +96,53 @@ async def test_stream_emits_snapshot_as_first_frame(migrated_db):
 
 
 @pytest.mark.asyncio
+async def test_current_picks_latest_run_when_started_at_ties(client, migrated_db):
+    """Two back-to-back runs on the same job can land on the same wall-clock
+    second because SQLite's datetime('now') only has 1-second resolution.
+    The snapshot must pick exactly one run per graph — the most recent one —
+    and must not bleed nodes from an older run into it. We use MAX(id) as
+    the tie-break, so the run whose rows were inserted last wins.
+    """
+    import aiosqlite
+
+    shared_ts = "2026-04-12T09:30:00"
+
+    async with aiosqlite.connect(migrated_db) as conn:
+        await conn.execute("INSERT INTO jobs (id) VALUES (1)")
+        # Older run — inserted first, so lower ids.
+        await conn.execute(
+            "INSERT INTO pipeline_events ("
+            "workflow_run_id, job_id, graph, node_name, status, started_at"
+            ") VALUES ('wf-old', 1, 'resume', 'jd_analysis', 'completed', ?)",
+            (shared_ts,),
+        )
+        await conn.execute(
+            "INSERT INTO pipeline_events ("
+            "workflow_run_id, job_id, graph, node_name, status, started_at"
+            ") VALUES ('wf-old', 1, 'resume', 'rag_retrieval', 'completed', ?)",
+            (shared_ts,),
+        )
+        # Newer run — same second, higher ids.
+        await conn.execute(
+            "INSERT INTO pipeline_events ("
+            "workflow_run_id, job_id, graph, node_name, status, started_at"
+            ") VALUES ('wf-new', 1, 'resume', 'jd_analysis', 'running', ?)",
+            (shared_ts,),
+        )
+        await conn.commit()
+
+    resp = await client.get("/api/pipeline/current", params={"job_id": 1})
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["active_runs"]["resume"] == "wf-new"
+    wf_ids = {n["workflow_run_id"] for n in data["nodes"]}
+    assert wf_ids == {"wf-new"}, (
+        f"snapshot bled rows from older run; got {wf_ids}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_orphans_returns_null_job_id_rows(client, migrated_db):
     import aiosqlite
 
