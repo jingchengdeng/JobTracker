@@ -76,7 +76,10 @@ describe("DELETE /api/jobs/[id]", () => {
 
   it("deletes and returns success", async () => {
     const deleted = { id: 1, title: "Dev" };
-    (db as any)._queueResult([deleted]);
+    // DELETE cascades through 6 awaited child-table deletes (interviewResults,
+    // interviewTurns, aiMessages, pipelineEvents, interviewSessions, aiRuns)
+    // before the final jobs delete. Each one pops from the mock queue.
+    (db as any)._queueResult([], [], [], [], [], [], [deleted]);
 
     const { DELETE } = await import("@/app/api/jobs/[id]/route");
     const req = new NextRequest("http://localhost:3000/api/jobs/1", {
