@@ -11,6 +11,13 @@ logger = logging.getLogger("jobtracker.rag")
 
 COLLECTION_NAME = "resume_chunks"  # legacy (pre-signature) collection name
 
+# Deadline for a single resume-corpus query. A healthy chroma on localhost
+# answers in well under a second, so anything over this is the server being
+# unresponsive (frozen, restarting, port hijacked by a stopped process). Raise
+# a TimeoutError so the resume pipeline fails loudly instead of hanging
+# forever in the rag_retrieval step.
+QUERY_TIMEOUT_SECONDS = 10.0
+
 
 async def index_resume(resume_id: int, resume_name: str, extracted_text: str):
     """Index a resume into the active collection and persist its state.
@@ -95,25 +102,39 @@ async def delete_resume_chunks(resume_id: int) -> int:
 
 
 async def query_resume_corpus(query: str, n_results: int = 10, filters: dict | None = None):
-    """Query the active collection for relevant experience chunks."""
-    col = await active_collection()
-    if col is None:
-        return []
+    """Query the active collection for relevant experience chunks.
 
-    where = filters if filters else None
-    results = await col.query(query_texts=[query], n_results=n_results, where=where)
+    Bounded by ``QUERY_TIMEOUT_SECONDS`` so an unresponsive chroma surfaces as
+    a visible TimeoutError rather than a silent pipeline hang.
+    """
+    async def _run():
+        col = await active_collection()
+        if col is None:
+            return []
 
-    chunks = []
-    if results and results["documents"]:
-        for i, doc in enumerate(results["documents"][0]):
-            meta = results["metadatas"][0][i] if results["metadatas"] else {}
-            chunks.append({
-                "text": meta.get("raw_text", doc),
-                "resume_name": meta.get("resume_name", ""),
-                "section_type": meta.get("section_type", ""),
-                "distance": results["distances"][0][i] if results["distances"] else None,
-            })
-    return chunks
+        where = filters if filters else None
+        results = await col.query(query_texts=[query], n_results=n_results, where=where)
+
+        chunks = []
+        if results and results["documents"]:
+            for i, doc in enumerate(results["documents"][0]):
+                meta = results["metadatas"][0][i] if results["metadatas"] else {}
+                chunks.append({
+                    "text": meta.get("raw_text", doc),
+                    "resume_name": meta.get("resume_name", ""),
+                    "section_type": meta.get("section_type", ""),
+                    "distance": results["distances"][0][i] if results["distances"] else None,
+                })
+        return chunks
+
+    try:
+        return await asyncio.wait_for(_run(), timeout=QUERY_TIMEOUT_SECONDS)
+    except TimeoutError:
+        logger.error(
+            "query_resume_corpus timed out after %.1fs — chroma may be unresponsive",
+            QUERY_TIMEOUT_SECONDS,
+        )
+        raise
 
 
 def _chunk_resume(text: str) -> list[dict]:
