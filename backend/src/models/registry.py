@@ -36,7 +36,7 @@ PROVIDERS: dict[str, dict] = {
         "client": "anthropic",
         "api": "anthropic-messages",
         "auth": "api_key",
-        "chatModels": ["kimi-k2.5", "kimi-k2", "kimi-k2-thinking"],
+        "chatModels": ["kimi-k2.6-code-preview", "kimi-k2.5", "kimi-k2", "kimi-k2-thinking"],
         "embeddingModels": [],
     },
     "openrouter": {
