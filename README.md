@@ -1,12 +1,12 @@
 # JobTracker
 
-A local-first job application tracker with AI-powered resume tailoring, mock interviews, and LinkedIn contact discovery.
+A multi-agent AI platform for the full job-search loop: resume tailoring with RAG-grounded rewriting, voice-driven mock interviews with evidence-cited scoring, and LinkedIn contact discovery with parallel search fan-out. Three LangGraph pipelines fire 10-12 LLM calls from a single Chrome-extension click, routed through a five-provider registry with automatic failover and observable live through a typed event bus and a pipeline topology introspected straight from the compiled graphs.
 
 ## Why I built this
 
 Job hunting is a grind. You're juggling dozens of applications across different stages, tailoring resumes for each role, practicing for interviews, and trying to find the right people to reach out to at each company. I was doing all of this in spreadsheets and browser tabs, and it was falling apart.
 
-So I built the tool I wished I had. One place to track every application, an AI agent that understands my resume and can tailor it to any JD, a mock interviewer that adapts to the role I'm targeting, and a search pipeline that finds the right contacts at each company without me manually combing through LinkedIn. Everything runs locally, my data stays mine, and I can swap LLM providers without changing a line of code.
+So I built the tool I wished I had， and turned it into an excuse to go deep on the infrastructure I actually wanted to work on. The backend is a long-running agent harness: one Chrome-extension click kicks off a master LangGraph that extracts the job, tailors my resume against it with ChromaDB RAG over my resume corpus, and fans out five parallel LinkedIn searches (recruiter, TA, hiring manager, HR, leadership) through either Brave or a shared Playwright browser. Every node emits through a typed event bus, the full topology is introspected directly from the compiled graphs and streamed to a live debug canvas, and every LLM call routes through a role-based provider registry with per-role fallback， so I can re-point any stage of the system (resume agents, classifier, embeddings, interviewer, LinkedIn extraction) at a different model or provider without touching a line of code.
 
 ## What it does
 
